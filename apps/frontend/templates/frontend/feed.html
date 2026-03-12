@@ -1,0 +1,316 @@
+{% extends 'frontend/base.html' %}
+{% block title %}Live Incident Feed — Siren.ng{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-950">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <h1 class="text-3xl font-black text-white">Live Incident Feed</h1>
+          <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+        </div>
+        <p class="text-gray-400 text-sm">Real-time emergency incidents reported across Lagos</p>
+      </div>
+      <a href="/report/" class="inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-red-900/30 transition-all hover:-translate-y-0.5 flex-shrink-0">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+        </svg>
+        Report Emergency
+      </a>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4 md:p-5 mb-6 space-y-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <!-- Search -->
+        <div class="relative">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+          </svg>
+          <input id="filter-zone" type="text" placeholder="Search by zone..."
+            class="w-full bg-gray-800 border border-gray-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors" />
+        </div>
+
+        <!-- Status -->
+        <select id="filter-status" class="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors">
+          <option value="">All Statuses</option>
+          <option value="DETECTED">Detected</option>
+          <option value="VERIFYING">Verifying</option>
+          <option value="VERIFIED">Verified</option>
+          <option value="RESPONDING">Responding</option>
+          <option value="AGENCY_NOTIFIED">Agency Notified</option>
+          <option value="RESOLVED">Resolved</option>
+          <option value="REJECTED">Rejected</option>
+        </select>
+
+        <!-- Severity -->
+        <select id="filter-severity" class="bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 transition-colors">
+          <option value="">All Severities</option>
+          <option value="CRITICAL">Critical</option>
+          <option value="HIGH">High</option>
+          <option value="MEDIUM">Medium</option>
+          <option value="LOW">Low</option>
+        </select>
+
+        <!-- Clear -->
+        <button onclick="clearFilters()" class="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 hover:text-white text-sm font-medium rounded-xl transition-all">
+          Clear Filters
+        </button>
+      </div>
+
+      <!-- Type chips -->
+      <div class="flex flex-wrap gap-2">
+        <button onclick="setTypeFilter('')" class="type-chip active px-3 py-1.5 text-xs font-semibold rounded-full transition-all" data-type="">ALL TYPES</button>
+        <button onclick="setTypeFilter('FIRE')" class="type-chip px-3 py-1.5 text-xs font-semibold rounded-full transition-all" data-type="FIRE">🔥 FIRE</button>
+        <button onclick="setTypeFilter('FLOOD')" class="type-chip px-3 py-1.5 text-xs font-semibold rounded-full transition-all" data-type="FLOOD">🌊 FLOOD</button>
+        <button onclick="setTypeFilter('RTA')" class="type-chip px-3 py-1.5 text-xs font-semibold rounded-full transition-all" data-type="RTA">🚗 RTA</button>
+        <button onclick="setTypeFilter('COLLAPSE')" class="type-chip px-3 py-1.5 text-xs font-semibold rounded-full transition-all" data-type="COLLAPSE">🏚️ COLLAPSE</button>
+        <button onclick="setTypeFilter('EXPLOSION')" class="type-chip px-3 py-1.5 text-xs font-semibold rounded-full transition-all" data-type="EXPLOSION">💥 EXPLOSION</button>
+        <button onclick="setTypeFilter('DROWNING')" class="type-chip px-3 py-1.5 text-xs font-semibold rounded-full transition-all" data-type="DROWNING">🆘 DROWNING</button>
+        <button onclick="setTypeFilter('HAZARD')" class="type-chip px-3 py-1.5 text-xs font-semibold rounded-full transition-all" data-type="HAZARD">⚡ HAZARD</button>
+      </div>
+    </div>
+
+    <!-- Results header -->
+    <div class="flex items-center justify-between mb-4">
+      <div id="results-count" class="text-sm text-gray-400">Loading...</div>
+      <button onclick="loadIncidents(true)" class="text-xs text-gray-500 hover:text-white transition-colors flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+        </svg>
+        Refresh
+      </button>
+    </div>
+
+    <!-- Loading skeleton -->
+    <div id="loading-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="skeleton h-48 rounded-2xl"></div>
+      <div class="skeleton h-48 rounded-2xl"></div>
+      <div class="skeleton h-48 rounded-2xl"></div>
+      <div class="skeleton h-48 rounded-2xl"></div>
+      <div class="skeleton h-48 rounded-2xl"></div>
+      <div class="skeleton h-48 rounded-2xl"></div>
+    </div>
+
+    <!-- Results grid -->
+    <div id="results-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="hidden text-center py-20">
+      <div class="text-6xl mb-4">🔎</div>
+      <h3 class="text-xl font-bold text-white mb-2">No incidents found</h3>
+      <p class="text-gray-500 text-sm mb-6">Try adjusting your filters or check back soon.</p>
+      <button onclick="clearFilters()" class="px-5 py-2.5 bg-gray-800 hover:bg-gray-700 text-white font-medium rounded-xl transition-colors text-sm">Clear all filters</button>
+    </div>
+
+    <!-- Load more -->
+    <div id="load-more-wrapper" class="hidden text-center mt-8">
+      <button onclick="loadMore()" id="load-more-btn" class="px-8 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-semibold rounded-xl transition-all hover:-translate-y-0.5 text-sm">
+        Load more incidents
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  .type-chip { background: #1f2937; color: #9ca3af; border: 1px solid #374151; }
+  .type-chip:hover, .type-chip.active { background: #ef4444; color: white; border-color: #ef4444; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let incidents = [];
+  let currentPage = 1;
+  let hasMore = false;
+  let totalCount = 0;
+  let currentTypeFilter = '';
+  let debounceTimer;
+  const PAGE_SIZE = 20;
+
+  const filters = {
+    status: '',
+    incident_type: '',
+    severity: '',
+    zone_name: '',
+  };
+
+  function setTypeFilter(type) {
+    currentTypeFilter = type;
+    filters.incident_type = type;
+    document.querySelectorAll('.type-chip').forEach(el => {
+      el.classList.toggle('active', el.dataset.type === type);
+    });
+    debouncedLoad();
+  }
+
+  function clearFilters() {
+    filters.status = '';
+    filters.incident_type = '';
+    filters.severity = '';
+    filters.zone_name = '';
+    currentTypeFilter = '';
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-severity').value = '';
+    document.getElementById('filter-zone').value = '';
+    document.querySelectorAll('.type-chip').forEach(el => {
+      el.classList.toggle('active', el.dataset.type === '');
+    });
+    loadIncidents(true);
+  }
+
+  function debouncedLoad() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => loadIncidents(true), 300);
+  }
+
+  async function loadIncidents(reset = false) {
+    if (reset) {
+      currentPage = 1;
+      incidents = [];
+    }
+
+    const params = new URLSearchParams();
+    if (filters.status) params.set('status', filters.status);
+    if (filters.incident_type) params.set('incident_type', filters.incident_type);
+    if (filters.severity) params.set('severity', filters.severity);
+    if (filters.zone_name) params.set('zone_name', filters.zone_name);
+    params.set('page', currentPage);
+    params.set('page_size', PAGE_SIZE);
+
+    if (reset) {
+      document.getElementById('loading-grid').classList.remove('hidden');
+      document.getElementById('results-grid').classList.add('hidden');
+      document.getElementById('empty-state').classList.add('hidden');
+    }
+
+    try {
+      const res = await fetch(`/api/incidents/?${params}`);
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+
+      const results = data.results || (Array.isArray(data) ? data : []);
+      totalCount = data.count !== undefined ? data.count : results.length;
+      hasMore = !!data.next;
+
+      if (reset) {
+        incidents = results;
+      } else {
+        incidents = [...incidents, ...results];
+      }
+
+      renderResults();
+    } catch(e) {
+      document.getElementById('loading-grid').classList.add('hidden');
+      document.getElementById('results-count').textContent = 'Failed to load incidents';
+    }
+  }
+
+  function renderResults() {
+    document.getElementById('loading-grid').classList.add('hidden');
+    const grid = document.getElementById('results-grid');
+    const empty = document.getElementById('empty-state');
+    const loadMoreWrapper = document.getElementById('load-more-wrapper');
+
+    document.getElementById('results-count').textContent = `${totalCount} incident${totalCount !== 1 ? 's' : ''} found`;
+
+    if (incidents.length === 0) {
+      grid.classList.add('hidden');
+      empty.classList.remove('hidden');
+      loadMoreWrapper.classList.add('hidden');
+      return;
+    }
+
+    empty.classList.add('hidden');
+    grid.classList.remove('hidden');
+
+    grid.innerHTML = incidents.map(inc => {
+      const conf = inc.ai_confidence ? Math.round(inc.ai_confidence * 100) : null;
+      const confColor = conf !== null ? (conf >= 75 ? '#22c55e' : conf >= 40 ? '#f59e0b' : '#ef4444') : '#374151';
+
+      return `
+        <div class="incident-card bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-2xl p-5 cursor-pointer" onclick="window.location='/track/${inc.id}/'">
+          <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <span class="text-2xl">${typeEmoji(inc.incident_type)}</span>
+              <div>
+                <span class="text-xs font-bold text-gray-300 uppercase tracking-wide">${inc.incident_type || 'UNKNOWN'}</span>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="status-badge px-2 py-0.5 rounded-full uppercase" style="background:${statusBg(inc.status)};color:${statusColor(inc.status)}">${inc.status}</span>
+                </div>
+              </div>
+            </div>
+            <span class="status-badge px-2 py-0.5 rounded-full uppercase flex-shrink-0" style="background:${severityBg(inc.severity)};color:${severityColor(inc.severity)}">${inc.severity || '—'}</span>
+          </div>
+
+          <p class="text-sm text-gray-300 mb-3 leading-relaxed" style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${(inc.description || '').substring(0,120)}${(inc.description||'').length > 120 ? '...' : ''}</p>
+
+          ${inc.address ? `
+          <div class="flex items-center gap-1.5 text-xs text-gray-500 mb-2">
+            <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/>
+            </svg>
+            <span class="truncate">${inc.address}</span>
+          </div>` : ''}
+
+          ${inc.zone_name || (inc.zone && inc.zone.name) ? `
+          <div class="text-xs text-gray-600 mb-2">${inc.zone_name || inc.zone.name}</div>` : ''}
+
+          ${conf !== null ? `
+          <div class="mb-3">
+            <div class="flex justify-between text-xs text-gray-600 mb-1">
+              <span>AI Confidence</span>
+              <span style="color:${confColor}">${conf}%</span>
+            </div>
+            <div class="w-full bg-gray-800 rounded-full h-1">
+              <div class="h-1 rounded-full transition-all" style="width:${conf}%;background:${confColor}"></div>
+            </div>
+          </div>` : ''}
+
+          <div class="flex items-center justify-between pt-3 border-t border-gray-800">
+            <div class="flex items-center gap-3 text-xs text-gray-500">
+              <span>${timeAgo(inc.created_at)}</span>
+              ${inc.vouch_count !== undefined ? `<span>${inc.vouch_count} vouches</span>` : ''}
+            </div>
+            <span class="text-sm font-semibold text-red-400 hover:text-red-300 transition-colors">Track →</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    loadMoreWrapper.classList.toggle('hidden', !hasMore);
+  }
+
+  async function loadMore() {
+    currentPage++;
+    const btn = document.getElementById('load-more-btn');
+    btn.textContent = 'Loading...';
+    btn.disabled = true;
+    await loadIncidents(false);
+    btn.textContent = 'Load more incidents';
+    btn.disabled = false;
+  }
+
+  // Wire up filters
+  document.getElementById('filter-zone').addEventListener('input', function() {
+    filters.zone_name = this.value.trim();
+    debouncedLoad();
+  });
+  document.getElementById('filter-status').addEventListener('change', function() {
+    filters.status = this.value;
+    debouncedLoad();
+  });
+  document.getElementById('filter-severity').addEventListener('change', function() {
+    filters.severity = this.value;
+    debouncedLoad();
+  });
+
+  // Init
+  loadIncidents(true);
+</script>
+{% endblock %}

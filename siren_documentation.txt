@@ -1,0 +1,156 @@
+================================================================================
+SIREN.NG — DEVELOPER DOCUMENTATION & ONBOARDING GUIDE
+================================================================================
+
+Welcome to the Siren.ng project! This document provides a complete technical 
+overview of the architecture, stack, integrations, and processes so a new 
+developer can easily understand how the system works and start making changes.
+
+================================================================================
+1. OVERVIEW & CORE PHILOSOPHY
+================================================================================
+Siren.ng is a community emergency coordination platform for Lagos. 
+The core philosophy is ZERO friction for the reporter:
+1. A user sends a WhatsApp message to the Siren number.
+2. Anthropic's Claude AI immediately verifies and categorizes the emergency.
+3. Nearest community responders and organizations are notified.
+4. The reporter gets a live tracking link to a web dashboard.
+5. The web platform handles live resource sharing and Paystack donations.
+
+WhatsApp is the entry point. The Web Dashboard is the richer experience.
+
+================================================================================
+2. TECHNOLOGY STACK
+================================================================================
+## Backend
+* Framework: Django 5.1 + Django REST Framework (DRF)
+* Database: PostgreSQL (Hosted on Supabase). *Note: We use plain PostgreSQL, 
+  NOT GeoDjango, to avoid complex GDAL/OSGeo4W dependencies on Windows.*
+* Async Tasks: Celery + Redis
+* Real-time: Django Channels + WebSockets (Daphne as ASGI server)
+* Spatial Queries: Raw SQL Haversine queries (in `utils/distance.py`)
+
+## Frontend
+* Framework: React 19 + TypeScript + Vite
+* Styling: TailwindCSS 3.4
+* Maps: React-Leaflet + Leaflet + OpenStreetMap (Free, no API keys)
+* State Management: Zustand + React Query
+
+## External Integrations
+* AI/Verification: Anthropic Claude (claude-sonnet-4-6)
+* Messaging: Twilio WhatsApp Business API
+* Payments/Donations: Paystack (using Sub-accounts for split payments)
+* Media Storage: Cloudinary (Images/Video)
+
+================================================================================
+3. SYSTEM ARCHITECTURE & DATA FLOW
+================================================================================
+1. Ingestion: 
+   * A user messages the Twilio WhatsApp number.
+   * Twilio sends a webhook POST request to `/api/ingest/whatsapp/`.
+   * The backend validates the Twilio signature and responds 200 immediately.
+
+2. AI Verification (Celery Task):
+   * `verify_incident_ai` task sends the report text to Anthropic Claude.
+   * Claude returns JSON identifying if it's a valid emergency, the severity, 
+     and incident type (FIRE, FLOOD, RTA, etc.).
+   * If `ai_confidence >= 0.75`, status gets updated to `VERIFIED`.
+
+3. Broadcasting & Dispatch:
+   * A raw Haversine SQL query (`utils/distance.py`) finds the nearest 
+     `VERIFIED` responders and clinics.
+   * Celery tasks send out Twilio WhatsApp alerts to those responders.
+   * The `incidents.consumers` Django Channel broadcasts the new incident via 
+     WebSocket to all active React frontends, plotting the pin on the live map.
+
+4. Resource Board & Donations:
+   * Users open the web link to see the live resource board.
+   * Donations use Paystack split payments. Money is split at the transaction 
+     level: a percentage goes to the platform, rest goes to Victim's/Responder's 
+     Paystack Sub-account.
+
+================================================================================
+4. PROJECT STRUCTURE
+================================================================================
+siren_ng/
+├── sirenapp/                 # Main Django config (settings.py, urls.py, celery.py, asgi.py)
+├── apps/                     # Django Apps directory
+│   ├── incidents/            # Core incident logic, models, WebSocket consumers, Claude tasks
+│   ├── whatsapp/             # Twilio webhooks, incoming message routing, outgoing templates
+│   ├── responders/           # Individual volunteer responders profiles & dispatch logic
+│   ├── organisations/        # Clinics, Agencies, NGOs profiles & logic
+│   ├── resources/            # Resource board claims & Paystack donation processing
+│   ├── subscriptions/        # Users watching specific coordinates for alerts
+│   ├── analytics/            # Dashboard stats and aggregating API views
+│   └── frontend/             # Optional Django app used to serve the Vite build
+├── utils/                    
+│   └── distance.py           # The raw Haversine SQL logic. All spatial queries go here.
+├── frontend/                 # React + Vite application
+│   ├── src/
+│   │   ├── api/              # Axios configurations & API calls
+│   │   ├── components/       # Shared UI components
+│   │   ├── pages/            # Page routing components
+│   │   └── store/            # Zustand stores
+├── .env                      # Environment variables
+└── manage.py                 
+
+================================================================================
+5. LOCAL DEVELOPMENT GUIDE
+================================================================================
+
+## Prerequisites
+* Python 3.13+
+* Node.js 20+
+
+## 1. Backend Setup
+1. Activate Virtual Environment:
+   `.\.venv\Scripts\Activate.ps1` (Windows)
+2. Install requirements:
+   `pip install -r requirements.txt`
+3. Environment variables:
+   Ensure your `.env` contains `DATABASE_URL` (Supabase Direct IPv4 string), 
+   `REDIS_URL`, `ANTHROPIC_API_KEY`, `TWILIO_*`, `PAYSTACK_*`.
+   Set `CELERY_ALWAYS_EAGER=True` in local dev so tasks run synchronously!
+4. Run migrations:
+   `python manage.py migrate`
+5. Start Django:
+   `python manage.py runserver`
+
+## 2. Frontend Setup
+1. Navigate to frontend:
+   `cd frontend`
+2. Install dependencies:
+   `npm install`
+3. Start Vite dev server:
+   `npm run dev`
+
+================================================================================
+6. HOW TO MAKE CHANGES (Best Practices)
+================================================================================
+
+Adding a new Model:
+1. NEVER use `django.contrib.gis`. Always use plain `models.Model`.
+2. For location, simply add `location_lat = models.FloatField()` and 
+   `location_lng = models.FloatField()`.
+3. Run `python manage.py makemigrations <app_name>` -> `python manage.py migrate`.
+
+Creating a new API endpoint:
+1. Write the view in `apps/<your_app>/views.py` using DRF (APIView or ViewSet).
+2. Wire it in `apps/<your_app>/urls.py`.
+3. If it modifies an incident, trigger `_transition()` in `incidents/tasks.py` 
+   so the WebSocket fires and the frontend updates instantly.
+
+Adding a new Frontend Component:
+1. Create the component inside `frontend/src/components/`.
+2. Use TailwindCSS for all styling (no custom CSS sheets unless absolutely needed).
+3. If it requires data, add the Axios call to `frontend/src/api/` and manage 
+   the state via Zustand or React Query.
+
+Testing Twilio Webhooks locally:
+Because Twilio needs a public URL to hit your local server, run `ngrok http 8000`.
+Copy the generated Forwarding URL and paste it into the Twilio Sandbox Webhook 
+URL field + `/api/ingest/whatsapp/`.
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================

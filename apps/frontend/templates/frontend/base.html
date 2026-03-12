@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Siren.ng — Emergency Coordination{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'sans-serif'] },
+          colors: {
+            siren: { 50:'#fff1f1', 100:'#ffe1e1', 500:'#ef4444', 600:'#dc2626', 700:'#b91c1c', 900:'#7f1d1d' }
+          },
+          animation: {
+            'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'fade-in': 'fadeIn 0.3s ease-in-out',
+            'slide-up': 'slideUp 0.4s ease-out',
+          },
+          keyframes: {
+            fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+            slideUp: { '0%': { transform: 'translateY(20px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .incident-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .incident-card:hover { transform: translateY(-2px); box-shadow: 0 20px 40px rgba(0,0,0,0.4); }
+    .status-badge { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.08em; }
+    .skeleton { background: linear-gradient(90deg, #1f2937 25%, #374151 50%, #1f2937 75%); background-size: 200% 100%; animation: skeleton-loading 1.5s infinite; }
+    @keyframes skeleton-loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .toast { animation: slideUp 0.3s ease-out; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #111827; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col">
+
+<!-- NAVBAR -->
+<nav class="sticky top-0 z-50 bg-gray-950/95 backdrop-blur border-b border-gray-800" x-data="navbar()">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-16">
+
+      <!-- Logo -->
+      <a href="/" class="flex items-center gap-3 group">
+        <div class="relative flex-shrink-0">
+          <div class="w-9 h-9 rounded-full bg-red-600 flex items-center justify-center shadow-lg shadow-red-900/40 group-hover:bg-red-500 transition-colors">
+            <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 2L4.09 12.82A1 1 0 005 14.5h7v7.5l8.91-10.82A1 1 0 0020 9.5h-7V2z"/>
+            </svg>
+          </div>
+          <!-- Pulsing dot for active incidents -->
+          <span x-show="hasActiveIncidents" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full animate-ping"></span>
+          <span x-show="hasActiveIncidents" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full"></span>
+        </div>
+        <div class="leading-tight">
+          <span class="font-bold text-white text-lg tracking-tight">Siren</span><span class="text-red-500 font-bold text-lg">.ng</span>
+          <div class="text-xs text-gray-500 font-medium tracking-wide -mt-0.5">Emergency Coordination</div>
+        </div>
+      </a>
+
+      <!-- Desktop Nav -->
+      <div class="hidden md:flex items-center gap-1">
+        <a href="/" class="px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all">Home</a>
+        <a href="/feed/" class="px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all">Live Feed</a>
+        <a href="/track/" class="px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all">Track</a>
+        <a href="/admin/" class="px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all">Admin</a>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <a href="/report/" class="hidden sm:inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-lg shadow-lg shadow-red-900/30 transition-all hover:shadow-red-900/50 hover:-translate-y-0.5">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+          </svg>
+          Report Emergency
+        </a>
+
+        <!-- Mobile menu button -->
+        <button @click="open = !open" class="md:hidden p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-all">
+          <svg x-show="!open" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+          </svg>
+          <svg x-show="open" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile menu -->
+  <div x-show="open" x-transition class="md:hidden border-t border-gray-800 bg-gray-950">
+    <div class="px-4 py-3 space-y-1">
+      <a href="/" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all">Home</a>
+      <a href="/feed/" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all">Live Feed</a>
+      <a href="/track/" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all">Track Incident</a>
+      <a href="/admin/" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-all">Admin</a>
+      <a href="/report/" class="block px-3 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-500 transition-all text-center mt-2">Report Emergency</a>
+    </div>
+  </div>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main class="flex-1">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- FOOTER -->
+<footer class="border-t border-gray-800 bg-gray-950 mt-16">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+      <div>
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-7 h-7 rounded-full bg-red-600 flex items-center justify-center">
+            <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M13 2L4.09 12.82A1 1 0 005 14.5h7v7.5l8.91-10.82A1 1 0 0020 9.5h-7V2z"/>
+            </svg>
+          </div>
+          <span class="font-bold text-white">Siren<span class="text-red-500">.ng</span></span>
+        </div>
+        <p class="text-gray-400 text-sm leading-relaxed">AI-powered emergency coordination for Lagos. One report. Verified in 90 seconds. Help on the way.</p>
+      </div>
+      <div>
+        <h4 class="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">Platform</h4>
+        <ul class="space-y-2 text-sm text-gray-400">
+          <li><a href="/report/" class="hover:text-white transition-colors">Report Emergency</a></li>
+          <li><a href="/feed/" class="hover:text-white transition-colors">Live Incident Feed</a></li>
+          <li><a href="/track/" class="hover:text-white transition-colors">Track Incident</a></li>
+          <li><a href="/admin/" class="hover:text-white transition-colors">Admin Portal</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="text-sm font-semibold text-gray-300 mb-3 uppercase tracking-wider">API</h4>
+        <ul class="space-y-2 text-sm text-gray-400">
+          <li><a href="/api/incidents/" class="hover:text-white transition-colors font-mono">GET /api/incidents/</a></li>
+          <li><a href="/api/incidents/active/" class="hover:text-white transition-colors font-mono">GET /api/incidents/active/</a></li>
+          <li><a href="/api/ingest/web/" class="hover:text-white transition-colors font-mono">POST /api/ingest/web/</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="border-t border-gray-800 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <p class="text-gray-500 text-xs">© 2025 Siren.ng. Built for Lagos. Powered by community.</p>
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+        <span class="text-gray-500 text-xs">Systems operational</span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- Toast container -->
+<div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2 pointer-events-none"></div>
+
+<script>
+  // Global utilities
+  window.sirenConfig = { hasActiveIncidents: false };
+
+  function navbar() {
+    return {
+      open: false,
+      hasActiveIncidents: window.sirenConfig.hasActiveIncidents,
+      init() {
+        window.addEventListener('siren:activeIncidents', (e) => {
+          this.hasActiveIncidents = e.detail > 0;
+        });
+      }
+    }
+  }
+
+  function timeAgo(isoString) {
+    if (!isoString) return 'Unknown';
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHr = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffSec < 60) return 'just now';
+    if (diffMin < 60) return diffMin + ' min' + (diffMin !== 1 ? 's' : '') + ' ago';
+    if (diffHr < 24) return diffHr + ' hour' + (diffHr !== 1 ? 's' : '') + ' ago';
+    return diffDay + ' day' + (diffDay !== 1 ? 's' : '') + ' ago';
+  }
+
+  function statusColor(status) {
+    const map = {
+      DETECTED: '#3b82f6',
+      VERIFYING: '#f59e0b',
+      VERIFIED: '#22c55e',
+      RESPONDING: '#f97316',
+      AGENCY_NOTIFIED: '#a855f7',
+      RESOLVED: '#6b7280',
+      REJECTED: '#ef4444',
+    };
+    return map[status] || '#6b7280';
+  }
+
+  function statusBg(status) {
+    const map = {
+      DETECTED: 'rgba(59,130,246,0.15)',
+      VERIFYING: 'rgba(245,158,11,0.15)',
+      VERIFIED: 'rgba(34,197,94,0.15)',
+      RESPONDING: 'rgba(249,115,22,0.15)',
+      AGENCY_NOTIFIED: 'rgba(168,85,247,0.15)',
+      RESOLVED: 'rgba(107,114,128,0.15)',
+      REJECTED: 'rgba(239,68,68,0.15)',
+    };
+    return map[status] || 'rgba(107,114,128,0.15)';
+  }
+
+  function severityColor(severity) {
+    const map = { LOW: '#22c55e', MEDIUM: '#f59e0b', HIGH: '#f97316', CRITICAL: '#ef4444' };
+    return map[severity] || '#6b7280';
+  }
+
+  function severityBg(severity) {
+    const map = {
+      LOW: 'rgba(34,197,94,0.15)',
+      MEDIUM: 'rgba(245,158,11,0.15)',
+      HIGH: 'rgba(249,115,22,0.15)',
+      CRITICAL: 'rgba(239,68,68,0.15)',
+    };
+    return map[severity] || 'rgba(107,114,128,0.15)';
+  }
+
+  function typeEmoji(type) {
+    const map = { FIRE:'🔥', FLOOD:'🌊', COLLAPSE:'🏚️', RTA:'🚗', EXPLOSION:'💥', DROWNING:'🆘', HAZARD:'⚡' };
+    return map[type] || '🚨';
+  }
+
+  function showToast(msg, type='info') {
+    const container = document.getElementById('toast-container');
+    const colors = { info:'bg-blue-800', success:'bg-green-800', error:'bg-red-800', warning:'bg-amber-800' };
+    const el = document.createElement('div');
+    el.className = `toast pointer-events-auto px-4 py-3 rounded-lg text-sm text-white font-medium shadow-2xl ${colors[type]||colors.info} max-w-sm`;
+    el.textContent = msg;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

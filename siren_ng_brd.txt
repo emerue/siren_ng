@@ -1,0 +1,2410 @@
+================================================================================
+SIREN.NG — FULL BUSINESS REQUIREMENTS DOCUMENT
+Version 4 — Final
+March 2026
+Stack: Python, Django, Supabase PostgreSQL, React, WhatsApp, Claude AI, Paystack
+================================================================================
+
+READ THIS BEFORE WRITING ANY CODE.
+This document is written for an AI coding assistant (Claude Code).
+Build in the exact phase order specified. Each phase must be fully working
+before starting the next. Do not skip ahead.
+
+================================================================================
+QUICK REFERENCE
+================================================================================
+
+Project name (Django):  sirenapp
+Database:               Supabase PostgreSQL (plain engine, no GeoDjango)
+AI verification:        Anthropic Claude (claude-sonnet-4-6)
+WhatsApp:               Twilio WhatsApp Business API
+Payments:               Paystack
+Map tiles:              OpenStreetMap (free, no API key)
+Task queue:             Celery + Redis (Railway)
+Real-time:              Django Channels + WebSocket
+Spatial queries:        Raw Haversine SQL in utils/distance.py
+NO GeoDjango. NO PointField. NO GDAL. NO PolygonField. Ever.
+
+================================================================================
+SECTION 1 — WHAT WE ARE BUILDING
+================================================================================
+
+Siren.ng is a community emergency coordination platform for Lagos, Nigeria.
+
+The problem: 53% of emergency calls in Lagos go unanswered. Response delays
+kill people. There is no single coordination point connecting willing helpers
+with people who need them in real time.
+
+The solution: One WhatsApp number. Send a message describing what you see.
+Within 90 seconds Claude AI verifies it, the nearest qualified community
+responder gets GPS directions to the scene, the closest clinic is alerted,
+and the reporter gets a live tracking link. No app download. No account.
+No form. Just one WhatsApp message.
+
+Beyond emergency response, Siren also:
+- Lets anyone save locations they care about (home, child's school, land)
+  and get WhatsApp alerts when incidents happen nearby
+- Runs a live community resource board on each active incident where people
+  can suggest and claim physical resources (cars, ladders, food, medical kits)
+- Accepts donations for victims, responders, and the platform with Paystack
+- Lets community members vouch for incidents to help verify them
+
+--------------------------------------------------------------------------------
+1.1 CORE PRINCIPLES — NEVER BREAK THESE
+--------------------------------------------------------------------------------
+
+1. WhatsApp is the entry point. Web is the richer experience.
+   Use the "foot in the door" approach: get people started on WhatsApp
+   with zero friction, then bring them to the website for richer actions
+   (donating, managing subscriptions, viewing the full resource board,
+   seeing the map). WhatsApp starts the relationship. The site deepens it.
+
+2. Zero friction for reporters. One WhatsApp message. No account, no app,
+   no form. If we add friction at the entry point, people don't report.
+
+3. AI filters before humans see anything. Responders only see VERIFIED
+   incidents. The feed stays trusted.
+
+4. Every incident closes visibly. The reporter must see the loop close —
+   what happened, who helped, how fast. This is what builds trust.
+
+5. Government is optional. Platform works fully without LASEMA.
+
+6. No account required for the public. Reporters, vouchers, resource
+   contributors, and donors are identified by WhatsApp number or a
+   short-lived session token. JWT login is only for agency operators
+   and platform admin. These are two completely separate tracks.
+   The landing-page-no-account approach does NOT conflict with
+   authentication for the protected dashboard.
+
+--------------------------------------------------------------------------------
+1.2 THE SEVEN INCIDENT TYPES — ONLY THESE ARE ACCEPTED
+--------------------------------------------------------------------------------
+
+Code        What qualifies
+----------- ----------------------------------------------------------------
+FIRE        Structure fire, vehicle fire, gas explosion.
+            NOT: trash fires, small cooking fires with no spread risk.
+FLOOD       Homes or roads submerged, people trapped by rising water.
+            NOT: puddles or mild waterlogging.
+COLLAPSE    Full or partial building collapse, imminent collapse with people.
+            NOT: cracks or cosmetic damage.
+RTA         Road crash with injuries or trapped victims.
+            NOT: minor fender benders with no injuries.
+EXPLOSION   Gas tanker, pipeline, or industrial explosion with radius risk.
+DROWNING    Person unable to self-rescue in water, boat capsize, flood rescue.
+HAZARD      Live downed power lines or collapsed infrastructure threatening life.
+
+Everything outside these seven is rejected at AI verification with a message
+pointing the reporter to the right resource.
+
+--------------------------------------------------------------------------------
+1.3 USER TYPES
+--------------------------------------------------------------------------------
+
+User Type            Primary Channel          What They Get
+-------------------- ------------------------ --------------------------------
+Reporter             WhatsApp                 AI confirmation, status updates,
+                                              loop closure message
+Community Responder  WhatsApp notifications   Verified incident alerts matched
+                                              to their skills and location
+Organisation         WhatsApp notifications   Incident routing, verified
+(clinic, ambulance)                           partner badge, community trust
+Location Subscriber  WhatsApp notifications   Alerts when incidents happen
+                                              near their saved locations
+Resource Contributor Web (from WhatsApp link) Claims items on resource board
+Donor                Web (from WhatsApp link) Donates via Paystack to one of
+                                              three funds
+Voucher              WhatsApp reaction        One-tap incident verification
+Agency Operator      Web dashboard (JWT)      Full incident queue + dispatch
+Platform Admin       Django Admin             Full system management
+
+================================================================================
+SECTION 2 — TECHNOLOGY STACK
+================================================================================
+
+--------------------------------------------------------------------------------
+2.1 BACKEND PACKAGES (requirements.txt)
+--------------------------------------------------------------------------------
+
+django==5.1
+djangorestframework==3.15
+psycopg2-binary==2.9
+dj-database-url==2.2
+python-decouple==3.8
+djangorestframework-simplejwt==5.3
+django-cors-headers==4.4
+whitenoise==6.7
+celery==5.4
+redis==5.0
+channels==4.1
+channels-redis==4.2
+daphne==4.1
+anthropic
+twilio==9.3
+cloudinary
+django-cloudinary-storage
+django-celery-beat==2.7
+requests
+
+--------------------------------------------------------------------------------
+2.2 FRONTEND PACKAGES (package.json)
+--------------------------------------------------------------------------------
+
+react@19
+vite@6
+typescript@5
+tailwindcss@3.4
+react-leaflet@4
+leaflet@1.9
+recharts@2
+axios@1.7
+@tanstack/react-query@5
+zustand@4
+react-router-dom@6
+lucide-react@0.383
+date-fns@3
+clsx@2
+
+--------------------------------------------------------------------------------
+2.3 INFRASTRUCTURE
+--------------------------------------------------------------------------------
+
+Service             Purpose
+------------------- -----------------------------------------------------------
+Supabase            PostgreSQL database. PostGIS pre-installed but NOT used
+                    from Django. Use Direct Connection URI from
+                    Settings > Database. NEVER use the pooler string.
+Railway (Redis)     Redis for Celery task queue and Django Channels layer.
+Railway (Deploy)    Hosts Django in production. Connect GitHub repo.
+Twilio              WhatsApp Business API. Receives all inbound WhatsApp
+                    messages. Sends all outbound messages.
+Paystack            Donations. Use sub-accounts for automatic fund splitting.
+                    Siren takes a percentage at transaction level.
+Cloudinary          Stores incident photos from web portal.
+OpenStreetMap       Free map tiles for react-leaflet. No API key needed.
+
+================================================================================
+SECTION 3 — PROJECT STRUCTURE
+================================================================================
+
+The project was created with: django-admin startproject sirenapp .
+The config module is sirenapp (not config).
+
+siren_ng/                         <- Root folder. manage.py lives here.
+├── sirenapp/
+│   ├── __init__.py               <- Import celery app here (see Section 9)
+│   ├── settings.py
+│   ├── urls.py
+│   ├── asgi.py
+│   ├── wsgi.py
+│   └── celery.py
+│
+├── apps/
+│   ├── __init__.py
+│   ├── incidents/                <- PHASE 1. Build this first.
+│   │   ├── __init__.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   ├── consumers.py          <- WebSocket
+│   │   ├── tasks.py              <- Claude AI verification
+│   │   └── admin.py
+│   │
+│   ├── whatsapp/                 <- PHASE 2
+│   │   ├── __init__.py
+│   │   ├── apps.py
+│   │   ├── views.py              <- Twilio webhook
+│   │   ├── urls.py
+│   │   ├── handlers.py           <- Routes all inbound messages
+│   │   ├── templates.py          <- All outbound message strings
+│   │   └── tasks.py              <- Async WhatsApp sends
+│   │
+│   ├── responders/               <- PHASE 3
+│   │   ├── __init__.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   ├── tasks.py
+│   │   └── admin.py
+│   │
+│   ├── organisations/            <- PHASE 3
+│   │   ├── __init__.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   ├── tasks.py
+│   │   └── admin.py
+│   │
+│   ├── resources/                <- PHASE 4 (resource board + donations)
+│   │   ├── __init__.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   └── admin.py
+│   │
+│   ├── subscriptions/            <- PHASE 5 (location watch feature)
+│   │   ├── __init__.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   ├── tasks.py
+│   │   └── admin.py
+│   │
+│   └── analytics/                <- PHASE 6
+│       ├── __init__.py
+│       ├── apps.py
+│       └── views.py
+│
+├── utils/
+│   ├── __init__.py
+│   └── distance.py               <- Haversine SQL. Build this in Phase 1.
+│
+├── frontend/                     <- PHASE 6
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── pages/
+│       ├── components/
+│       ├── hooks/
+│       ├── store/
+│       ├── api/
+│       └── types/index.ts
+│
+├── .env
+├── .gitignore
+├── requirements.txt
+└── manage.py
+
+================================================================================
+SECTION 4 — SETTINGS FILE (sirenapp/settings.py)
+================================================================================
+
+Copy this exactly.
+
+--------------------------------------------------------------------------------
+
+from pathlib import Path
+from decouple import config
+import dj_database_url
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+SECRET_KEY = config('SECRET_KEY')
+DEBUG = config('DEBUG', default=True, cast=bool)
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
+
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    # Third party
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'corsheaders',
+    'channels',
+    'cloudinary',
+    'cloudinary_storage',
+    # Siren apps
+    'apps.incidents',
+    'apps.whatsapp',
+    'apps.responders',
+    'apps.organisations',
+    'apps.resources',
+    'apps.subscriptions',
+    'apps.analytics',
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',        # Must be first
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'sirenapp.urls'
+ASGI_APPLICATION = 'sirenapp.asgi.application'
+
+TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates',
+    'DIRS': [], 'APP_DIRS': True, 'OPTIONS': {'context_processors': [
+        'django.template.context_processors.debug',
+        'django.template.context_processors.request',
+        'django.contrib.auth.context_processors.auth',
+        'django.contrib.messages.context_processors.messages',
+    ]},
+}]
+
+# Database — Supabase, plain PostgreSQL engine (NO GeoDjango engine)
+DATABASES = {
+    'default': dj_database_url.parse(
+        config('DATABASE_URL'),
+        engine='django.db.backends.postgresql'
+    )
+}
+
+# Django Channels (WebSocket)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {'hosts': [config('REDIS_URL', default='redis://localhost:6379/0')]},
+    }
+}
+
+# Celery
+CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_TASK_ALWAYS_EAGER = config('CELERY_ALWAYS_EAGER', default=True, cast=bool)
+
+# REST Framework + JWT
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+    ),
+}
+
+CORS_ALLOWED_ORIGINS = ['http://localhost:5173', 'http://localhost:3000']
+
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': config('CLOUDINARY_CLOUD_NAME', default=''),
+    'API_KEY':    config('CLOUDINARY_API_KEY', default=''),
+    'API_SECRET': config('CLOUDINARY_API_SECRET', default=''),
+}
+
+ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default='')
+ANTHROPIC_MODEL   = config('ANTHROPIC_MODEL', default='claude-sonnet-4-6')
+
+TWILIO_ACCOUNT_SID     = config('TWILIO_ACCOUNT_SID', default='')
+TWILIO_AUTH_TOKEN      = config('TWILIO_AUTH_TOKEN', default='')
+TWILIO_WHATSAPP_NUMBER = config('TWILIO_WHATSAPP_NUMBER', default='')
+
+PAYSTACK_SECRET_KEY = config('PAYSTACK_SECRET_KEY', default='')
+PAYSTACK_PUBLIC_KEY = config('PAYSTACK_PUBLIC_KEY', default='')
+SIREN_PAYSTACK_SUBACCOUNT = config('SIREN_PAYSTACK_SUBACCOUNT', default='')
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+LANGUAGE_CODE = 'en-us'
+TIME_ZONE = 'Africa/Lagos'
+USE_TZ = True
+
+================================================================================
+SECTION 5 — ENVIRONMENT VARIABLES (.env)
+================================================================================
+
+SECRET_KEY=any-long-random-string-minimum-50-characters
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1
+CELERY_ALWAYS_EAGER=True
+
+# Supabase — Settings > Database > Direct Connection URI
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+
+# Railway Redis — from Redis service Variables tab
+REDIS_URL=redis://default:[PASSWORD]@[HOST]:[PORT]
+
+# Anthropic Claude — console.anthropic.com > API Keys
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4-6
+
+# Twilio — console.twilio.com
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_WHATSAPP_NUMBER=whatsapp:+234XXXXXXXXXX
+
+# Paystack — dashboard.paystack.com > Settings > API Keys
+PAYSTACK_SECRET_KEY=sk_live_...
+PAYSTACK_PUBLIC_KEY=pk_live_...
+SIREN_PAYSTACK_SUBACCOUNT=ACCT_...   # Siren's own sub-account code
+
+# Cloudinary — cloudinary.com dashboard
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+
+# .gitignore — create this immediately
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+db.sqlite3
+staticfiles/
+media/
+node_modules/
+dist/
+
+================================================================================
+SECTION 6 — HAVERSINE DISTANCE UTILITY (utils/distance.py)
+================================================================================
+
+Create this file before writing any app. Every distance calculation in the
+system uses this single function. It runs directly on Supabase's PostgreSQL.
+
+IMPORTANT: The query uses HAVING (not WHERE) for the distance filter because
+distance_km is a computed column alias. Do not change HAVING to WHERE.
+
+--------------------------------------------------------------------------------
+
+# utils/distance.py
+from django.db import connection
+
+
+def haversine_query(table, lat_field, lng_field, incident_lat, incident_lng,
+                    radius_km, extra_filters='', extra_params=None, limit=10):
+    """
+    Returns rows from `table` within radius_km of (incident_lat, incident_lng).
+    Ordered by distance ascending (nearest first).
+
+    Args:
+        table:          database table name e.g. 'responders_responder'
+        lat_field:      latitude column name e.g. 'home_lat'
+        lng_field:      longitude column name e.g. 'home_lng'
+        incident_lat:   float latitude of the reference point
+        incident_lng:   float longitude of the reference point
+        radius_km:      maximum distance in kilometres
+        extra_filters:  additional SQL e.g. "AND status = 'VERIFIED'"
+        extra_params:   list of params for extra_filters placeholders
+        limit:          max number of results
+
+    Returns:
+        List of dicts. Each dict has all table columns plus 'distance_km'.
+    """
+    base_params = [incident_lat, incident_lng, incident_lat]
+    filter_params = extra_params or []
+    params = base_params + filter_params + [radius_km]
+
+    sql = f"""
+        SELECT *,
+          (6371 * acos(
+            LEAST(1.0,
+              cos(radians(%s)) * cos(radians({lat_field})) *
+              cos(radians({lng_field}) - radians(%s)) +
+              sin(radians(%s)) * sin(radians({lat_field}))
+            )
+          )) AS distance_km
+        FROM {table}
+        WHERE (1=1) {extra_filters}
+        HAVING distance_km <= %s
+        ORDER BY distance_km ASC
+        LIMIT {limit}
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        columns = [col[0] for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+# USAGE EXAMPLES:
+#
+# Nearest verified available responders within 5km:
+#   from utils.distance import haversine_query
+#   results = haversine_query(
+#       table='responders_responder',
+#       lat_field='home_lat', lng_field='home_lng',
+#       incident_lat=6.5244, incident_lng=3.3792,
+#       radius_km=5.0,
+#       extra_filters="AND status = 'VERIFIED' AND is_available = TRUE",
+#       limit=5
+#   )
+#
+# Active subscriptions near an incident:
+#   results = haversine_query(
+#       table='subscriptions_locationsubscription',
+#       lat_field='location_lat', lng_field='location_lng',
+#       incident_lat=6.5244, incident_lng=3.3792,
+#       radius_km=10.0,
+#       extra_filters='AND is_active = TRUE',
+#       limit=500
+#   )
+
+================================================================================
+SECTION 7 — DATA MODELS
+================================================================================
+
+CRITICAL RULES FOR ALL MODELS:
+- Use: from django.db import models
+- NEVER use: from django.contrib.gis.db import models
+- All location data is two FloatFields: location_lat and location_lng
+- No PointField, no PolygonField, no GeoDjango anywhere
+
+--------------------------------------------------------------------------------
+7.1 INCIDENTS APP MODELS (apps/incidents/models.py)
+--------------------------------------------------------------------------------
+
+import uuid
+from django.db import models
+
+
+class IncidentType(models.TextChoices):
+    FIRE      = 'FIRE',      'Fire Outbreak'
+    FLOOD     = 'FLOOD',     'Flooding'
+    COLLAPSE  = 'COLLAPSE',  'Building/Structural Collapse'
+    RTA       = 'RTA',       'Road Traffic Accident'
+    EXPLOSION = 'EXPLOSION', 'Gas/Chemical Explosion'
+    DROWNING  = 'DROWNING',  'Drowning/Water Emergency'
+    HAZARD    = 'HAZARD',    'Structural/Electrical Hazard'
+
+
+class IncidentSeverity(models.TextChoices):
+    LOW      = 'LOW',      'Low'
+    MEDIUM   = 'MEDIUM',   'Medium'
+    HIGH     = 'HIGH',     'High'
+    CRITICAL = 'CRITICAL', 'Critical'
+
+
+class IncidentStatus(models.TextChoices):
+    DETECTED        = 'DETECTED',        'Detected'
+    VERIFYING       = 'VERIFYING',       'Verifying'
+    VERIFIED        = 'VERIFIED',        'Verified'
+    RESPONDING      = 'RESPONDING',      'Community Responding'
+    AGENCY_NOTIFIED = 'AGENCY_NOTIFIED', 'Agency Notified'
+    RESOLVED        = 'RESOLVED',        'Resolved'
+    REJECTED        = 'REJECTED',        'Rejected'
+
+
+class Incident(models.Model):
+    id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source        = models.CharField(max_length=20,
+                      choices=[('WHATSAPP', 'WhatsApp'), ('WEB', 'Web Portal')])
+    external_id   = models.CharField(max_length=200, blank=True)  # Twilio SID
+    reporter_hash = models.CharField(max_length=64)               # SHA256 of phone
+    reporter_phone = models.CharField(max_length=20, blank=True)  # Needed to send replies
+
+    # Classification
+    incident_type = models.CharField(max_length=20, choices=IncidentType.choices, blank=True)
+    description   = models.TextField()
+    severity      = models.CharField(max_length=10, choices=IncidentSeverity.choices,
+                      default='MEDIUM')
+    status        = models.CharField(max_length=20, choices=IncidentStatus.choices,
+                      default='DETECTED')
+
+    # Location — two plain FloatFields, NO GeoDjango
+    location_lat  = models.FloatField(null=True, blank=True)
+    location_lng  = models.FloatField(null=True, blank=True)
+    address_text  = models.CharField(max_length=500, blank=True)
+    zone_name     = models.CharField(max_length=100, blank=True)
+
+    # Media
+    media_urls    = models.JSONField(default=list)
+
+    # AI verification
+    ai_confidence   = models.FloatField(default=0.0)
+    fraud_score     = models.FloatField(default=0.0)
+    ai_raw_response = models.JSONField(default=dict)
+
+    # Community verification
+    vouch_count     = models.PositiveIntegerField(default=0)
+    vouch_threshold = models.PositiveIntegerField(default=3)
+
+    # Donations summary (updated whenever a donation is made)
+    total_donations_kobo = models.PositiveIntegerField(default=0)  # Stored in kobo
+    donation_count       = models.PositiveIntegerField(default=0)
+
+    # Assigned agency
+    agency_assigned = models.ForeignKey(
+        'organisations.Organisation', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='assigned_incidents'
+    )
+
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    @property
+    def vouch_threshold_for_severity(self):
+        return {'CRITICAL': 1, 'HIGH': 2, 'MEDIUM': 3, 'LOW': 5}.get(self.severity, 3)
+
+    def set_vouch_threshold(self):
+        self.vouch_threshold = self.vouch_threshold_for_severity
+        self.save(update_fields=['vouch_threshold'])
+
+    @property
+    def total_donations_naira(self):
+        return self.total_donations_kobo / 100
+
+
+class ResponseLog(models.Model):
+    """Immutable record of every status change. Never delete these."""
+    incident    = models.ForeignKey(Incident, on_delete=models.CASCADE,
+                    related_name='response_logs')
+    from_status = models.CharField(max_length=20, blank=True)
+    to_status   = models.CharField(max_length=20)
+    actor       = models.CharField(max_length=200)  # 'AI', 'community', 'agency', 'admin'
+    note        = models.TextField(blank=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+
+class VouchRecord(models.Model):
+    """One vouch per session per incident. unique_together prevents duplicates."""
+    incident      = models.ForeignKey(Incident, on_delete=models.CASCADE,
+                      related_name='vouches')
+    session_hash  = models.CharField(max_length=64)  # SHA256(IP + UserAgent + incident_id)
+    voucher_lat   = models.FloatField(null=True, blank=True)
+    voucher_lng   = models.FloatField(null=True, blank=True)
+    distance_km   = models.FloatField(null=True, blank=True)
+    is_suspicious = models.BooleanField(default=False)
+    source        = models.CharField(max_length=20,
+                      choices=[('WEB', 'Web'), ('WHATSAPP', 'WhatsApp reaction')],
+                      default='WEB')
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('incident', 'session_hash')
+
+--------------------------------------------------------------------------------
+7.2 RESPONDERS APP MODELS (apps/responders/models.py)
+--------------------------------------------------------------------------------
+
+import uuid
+from django.db import models
+
+
+class SkillCategory(models.TextChoices):
+    MEDICAL_ADVANCED = 'MED_ADV',    'Medical Advanced (Doctor/Surgeon)'
+    MEDICAL_BASIC    = 'MED_BASIC',  'Medical Basic (Nurse/Paramedic)'
+    FIRE_RESPONSE    = 'FIRE',       'Fire Response'
+    WATER_RESCUE     = 'WATER',      'Water/Flood Rescue'
+    STRUCTURAL       = 'STRUCTURAL', 'Structural Rescue/Engineer'
+    ELECTRICAL       = 'ELECTRICAL', 'Electrical (Licensed)'
+    FIRST_AID        = 'FIRST_AID',  'First Aid/CPR Certified'
+
+
+class Responder(models.Model):
+    id                 = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name               = models.CharField(max_length=200)
+    phone_hash         = models.CharField(max_length=64, unique=True)
+    whatsapp_number    = models.CharField(max_length=20)  # E.164: +2348012345678
+    skill_category     = models.CharField(max_length=20, choices=SkillCategory.choices)
+    status             = models.CharField(max_length=15,
+                           choices=[('PENDING','Pending'),('VERIFIED','Verified'),
+                                    ('SUSPENDED','Suspended')],
+                           default='PENDING')
+    licence_number     = models.CharField(max_length=100, blank=True)
+    home_lat           = models.FloatField()
+    home_lng           = models.FloatField()
+    response_radius_km = models.FloatField(default=2.0)
+    is_available       = models.BooleanField(default=False)
+    responds_to        = models.JSONField(default=list)  # List of IncidentType values
+    total_responses    = models.PositiveIntegerField(default=0)
+    zone_name          = models.CharField(max_length=100, blank=True)
+
+    # Paystack sub-account for receiving appreciation donations
+    paystack_subaccount = models.CharField(max_length=100, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ResponderDispatch(models.Model):
+    """Every notification sent to a responder for an incident."""
+    responder    = models.ForeignKey(Responder, on_delete=models.CASCADE)
+    incident     = models.ForeignKey('incidents.Incident', on_delete=models.CASCADE)
+    notified_at  = models.DateTimeField(auto_now_add=True)
+    accepted     = models.BooleanField(null=True)  # None=pending True=yes False=no
+    on_scene_at  = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('responder', 'incident')
+
+--------------------------------------------------------------------------------
+7.3 ORGANISATIONS APP MODELS (apps/organisations/models.py)
+--------------------------------------------------------------------------------
+
+import uuid
+from django.db import models
+
+
+class Organisation(models.Model):
+    id               = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name             = models.CharField(max_length=300)
+    org_type         = models.CharField(max_length=20, choices=[
+                         ('HOSPITAL','Hospital/Clinic'),
+                         ('AMBULANCE','Ambulance Service'),
+                         ('PHARMACY','Pharmacy'),
+                         ('TOWING','Towing/Heavy Equipment'),
+                         ('FIRE_SAFETY','Fire Safety Company'),
+                         ('NGO','NGO/Community Group'),
+                         ('AGENCY','Government Agency'),
+                         ('OTHER','Other'),
+                       ])
+    status           = models.CharField(max_length=15,
+                         choices=[('PENDING','Pending'),('VERIFIED','Verified'),
+                                  ('SUSPENDED','Suspended')],
+                         default='PENDING')
+    location_lat     = models.FloatField()
+    location_lng     = models.FloatField()
+    address          = models.CharField(max_length=500)
+    zone_name        = models.CharField(max_length=100, blank=True)
+    response_radius_km = models.FloatField(default=5.0)
+    contact_name     = models.CharField(max_length=200)
+    contact_whatsapp = models.CharField(max_length=20)
+    contact_phone    = models.CharField(max_length=20, blank=True)
+    responds_to      = models.JSONField(default=list)
+    operating_hours  = models.CharField(max_length=200, default='24/7')
+    cac_number       = models.CharField(max_length=100, blank=True)
+    total_responses  = models.PositiveIntegerField(default=0)
+    dashboard_user   = models.OneToOneField('auth.User', null=True, blank=True,
+                         on_delete=models.SET_NULL, related_name='organisation')
+    created_at       = models.DateTimeField(auto_now_add=True)
+
+--------------------------------------------------------------------------------
+7.4 RESOURCES APP MODELS (apps/resources/models.py)
+--------------------------------------------------------------------------------
+
+This app handles two things: the live resource board and donations.
+Both are attached to an Incident.
+
+import uuid
+from django.db import models
+
+
+# ── RESOURCE BOARD ────────────────────────────────────────────────────────────
+
+RESOURCE_CATEGORIES = [
+    ('TRANSPORT',  'Transport (car, bike, keke)'),
+    ('EQUIPMENT',  'Equipment (ladder, generator, rope, torch)'),
+    ('MEDICAL',    'Medical (first aid kit, stretcher, oxygen)'),
+    ('FOOD_WATER', 'Food and Water'),
+    ('MANPOWER',   'Manpower (extra hands needed)'),
+    ('OTHER',      'Other'),
+]
+
+RESOURCE_STATUS = [
+    ('NEEDED',    'Needed'),       # Just suggested, nobody claimed
+    ('CLAIMED',   'Claimed'),      # Someone said they are bringing it
+    ('ARRIVED',   'Arrived'),      # Confirmed on scene by reporter/responder
+]
+
+
+class ResourceItem(models.Model):
+    """
+    A single resource suggested for an active incident.
+    Anyone can suggest. Anyone can claim. Reporter or verified responder confirms arrival.
+    """
+    id           = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    incident     = models.ForeignKey('incidents.Incident', on_delete=models.CASCADE,
+                     related_name='resources')
+    category     = models.CharField(max_length=20, choices=RESOURCE_CATEGORIES)
+    label        = models.CharField(max_length=200)  # e.g. '6-foot ladder', '20L water'
+    status       = models.CharField(max_length=10, choices=RESOURCE_STATUS, default='NEEDED')
+
+    # Who suggested it
+    suggested_by_hash   = models.CharField(max_length=64)  # Session or phone hash
+    suggested_by_name   = models.CharField(max_length=100, blank=True)
+    suggested_via       = models.CharField(max_length=20,
+                            choices=[('WEB','Web'),('WHATSAPP','WhatsApp')],
+                            default='WEB')
+
+    # Who claimed it (can be multiple people for same item)
+    # Claims tracked in ResourceClaim model below
+
+    # Confirmation
+    confirmed_by_hash   = models.CharField(max_length=64, blank=True)
+    confirmed_at        = models.DateTimeField(null=True, blank=True)
+
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['status', 'category', 'created_at']
+
+    def __str__(self):
+        return f'{self.label} ({self.status}) — {self.incident_id}'
+
+
+class ResourceClaim(models.Model):
+    """
+    Someone clicked 'I can bring this'.
+    Multiple people can claim the same item.
+    The board shows: '3 people said they can bring a 6-foot ladder'.
+    """
+    resource     = models.ForeignKey(ResourceItem, on_delete=models.CASCADE,
+                     related_name='claims')
+    claimer_hash = models.CharField(max_length=64)
+    claimer_name = models.CharField(max_length=100, blank=True)
+    claimer_phone = models.CharField(max_length=20, blank=True)  # Optional for contact
+    claimed_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('resource', 'claimer_hash')  # One claim per person per item
+
+
+# ── DONATIONS ─────────────────────────────────────────────────────────────────
+
+DONATION_FUND_CHOICES = [
+    ('VICTIM',    'Victim Relief — goes to the affected person or family'),
+    ('RESPONDER', 'First Responder Appreciation — split equally among responders on scene'),
+    ('PLATFORM',  'Emergency Response Fund — keeps Siren running'),
+]
+
+DONATION_STATUS = [
+    ('PENDING',   'Pending'),
+    ('SUCCESS',   'Success'),
+    ('FAILED',    'Failed'),
+    ('REFUNDED',  'Refunded'),
+]
+
+
+class Donation(models.Model):
+    """
+    A donation made to an active or recently resolved incident.
+    Processed via Paystack. Siren takes a percentage via sub-accounts.
+    """
+    id              = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    incident        = models.ForeignKey('incidents.Incident', on_delete=models.CASCADE,
+                        related_name='donations')
+    donor_name      = models.CharField(max_length=200, blank=True)
+    donor_email     = models.EmailField(blank=True)
+    donor_phone     = models.CharField(max_length=20, blank=True)
+    amount_kobo     = models.PositiveIntegerField()  # Amount in kobo (100 kobo = 1 naira)
+    fund_choice     = models.CharField(max_length=15, choices=DONATION_FUND_CHOICES)
+    status          = models.CharField(max_length=10, choices=DONATION_STATUS, default='PENDING')
+
+    # Paystack references
+    paystack_reference = models.CharField(max_length=200, unique=True)
+    paystack_response  = models.JSONField(default=dict)  # Full webhook payload
+
+    # Recipient sub-account (set at payment initiation based on fund_choice)
+    recipient_subaccount = models.CharField(max_length=100, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    @property
+    def amount_naira(self):
+        return self.amount_kobo / 100
+
+--------------------------------------------------------------------------------
+7.5 SUBSCRIPTIONS APP MODELS (apps/subscriptions/models.py)
+--------------------------------------------------------------------------------
+
+import uuid
+from django.db import models
+
+
+class LocationSubscription(models.Model):
+    """
+    A saved location the subscriber wants monitored.
+    When a VERIFIED incident happens within alert_radius_km,
+    they get a WhatsApp notification.
+    """
+    LOCATION_TYPES = [
+        ('HOME',   'Home'),
+        ('SCHOOL', 'School/Child location'),
+        ('LAND',   'Land/Property'),
+        ('OFFICE', 'Office/Workplace'),
+        ('FAMILY', 'Family member location'),
+        ('OTHER',  'Other'),
+    ]
+
+    id              = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    phone_hash      = models.CharField(max_length=64)
+    whatsapp_number = models.CharField(max_length=20)
+    label           = models.CharField(max_length=200)  # e.g. 'Timi school'
+    location_type   = models.CharField(max_length=10, choices=LOCATION_TYPES, default='HOME')
+    location_lat    = models.FloatField()
+    location_lng    = models.FloatField()
+    address_text    = models.CharField(max_length=500, blank=True)
+    alert_radius_km = models.FloatField(default=1.0)
+    is_active       = models.BooleanField(default=True)
+    incident_types  = models.JSONField(default=list)  # Empty = all types
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['label']
+
+
+class SubscriptionAlert(models.Model):
+    """
+    Records every alert sent. Prevents duplicate alerts for same incident + subscription.
+    """
+    subscription = models.ForeignKey(LocationSubscription, on_delete=models.CASCADE,
+                     related_name='alerts')
+    incident     = models.ForeignKey('incidents.Incident', on_delete=models.CASCADE,
+                     related_name='subscription_alerts')
+    distance_km  = models.FloatField()
+    sent_at      = models.DateTimeField(auto_now_add=True)
+    delivered    = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('subscription', 'incident')
+
+================================================================================
+SECTION 8 — CELERY SETUP
+================================================================================
+
+# sirenapp/celery.py
+import os
+from celery import Celery
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'sirenapp.settings')
+app = Celery('sirenapp')
+app.config_from_object('django.conf:settings', namespace='CELERY')
+app.autodiscover_tasks()
+
+---
+
+# sirenapp/__init__.py — add these lines
+from .celery import app as celery_app
+__all__ = ('celery_app',)
+
+================================================================================
+SECTION 9 — API ENDPOINTS
+================================================================================
+
+All prefixed /api/. JWT required only where stated. Everything else is public.
+
+--------------------------------------------------------------------------------
+9.1 ROOT URL CONFIG (sirenapp/urls.py)
+--------------------------------------------------------------------------------
+
+from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/ingest/', include('apps.whatsapp.urls')),
+    path('api/incidents/', include('apps.incidents.urls')),
+    path('api/responders/', include('apps.responders.urls')),
+    path('api/organisations/', include('apps.organisations.urls')),
+    path('api/resources/', include('apps.resources.urls')),
+    path('api/subscriptions/', include('apps.subscriptions.urls')),
+    path('api/analytics/', include('apps.analytics.urls')),
+    path('api/auth/', include('rest_framework_simplejwt.urls')),
+]
+
+--------------------------------------------------------------------------------
+9.2 INCIDENT ENDPOINTS
+--------------------------------------------------------------------------------
+
+POST   /api/ingest/whatsapp/
+       Twilio webhook. Validates Twilio signature. Returns 200 immediately.
+       Queues verify_incident_ai Celery task.
+
+POST   /api/ingest/web/
+       Web form submission. No auth. Body: {description, location_lat,
+       location_lng, address_text, incident_type, media}.
+       Returns: {id, tracking_url}
+
+GET    /api/incidents/
+       Public paginated feed. Params: zone_name, status, incident_type,
+       severity. 20 per page. Only VERIFIED and above shown publicly.
+
+GET    /api/incidents/active/
+       All active incidents for the live map. No pagination.
+       Returns VERIFIED, RESPONDING, AGENCY_NOTIFIED.
+
+GET    /api/incidents/{id}/
+       Single incident with response_logs, vouch_count, resources,
+       donation summary.
+
+GET    /api/incidents/{id}/track/
+       Reporter's tracking data. Returns current status and latest log.
+       No auth. Used in the WhatsApp tracking link.
+
+POST   /api/incidents/{id}/vouch/
+       Submit a vouch. Body: {lat, lng} optional.
+       Rate limited to 1 per session_hash per incident.
+
+PATCH  /api/incidents/{id}/dispatch/
+       JWT required. Sets status to AGENCY_NOTIFIED.
+
+PATCH  /api/incidents/{id}/resolve/
+       JWT required. Sets status to RESOLVED. Sets resolved_at.
+
+--------------------------------------------------------------------------------
+9.3 RESPONDER ENDPOINTS
+--------------------------------------------------------------------------------
+
+POST   /api/responders/register/
+       Self-registration. No auth. Creates PENDING responder.
+
+POST   /api/responders/availability/
+       Toggle on/off. Body: {phone_hash, is_available}.
+
+POST   /api/responders/dispatch/{id}/accept/
+       Responder accepts notification. Sets accepted=True.
+
+POST   /api/responders/dispatch/{id}/decline/
+       Responder declines. Triggers next nearest notification.
+
+POST   /api/responders/dispatch/{id}/onscene/
+       Marks arrival. Sets on_scene_at timestamp.
+
+POST   /api/responders/dispatch/{id}/complete/
+       Marks done. Sets completed_at timestamp.
+
+--------------------------------------------------------------------------------
+9.4 ORGANISATION ENDPOINTS
+--------------------------------------------------------------------------------
+
+POST   /api/organisations/register/
+       Self-registration. No auth. Creates PENDING.
+
+POST   /api/organisations/{id}/respond/
+       Confirm or decline capacity. Body: {can_receive: true/false}.
+
+GET    /api/organisations/map/
+       All VERIFIED organisations for map display.
+
+GET    /api/organisations/{id}/
+       Public profile with response stats.
+
+--------------------------------------------------------------------------------
+9.5 RESOURCE BOARD ENDPOINTS
+--------------------------------------------------------------------------------
+
+GET    /api/resources/?incident={id}
+       All resources for an incident. Returns list with claim counts.
+       Publicly visible on the incident page.
+
+POST   /api/resources/
+       Suggest a new resource. No auth.
+       Body: {incident, category, label, suggested_by_name, session_hash}
+
+POST   /api/resources/{id}/claim/
+       Claim a resource (I can bring this). No auth.
+       Body: {claimer_name, claimer_phone, session_hash}
+       One claim per session_hash per resource.
+
+POST   /api/resources/{id}/confirm/
+       Confirm item has arrived. Only reporter or verified responder.
+       Body: {confirmer_hash}
+       Sets status to ARRIVED, sets confirmed_at.
+
+--------------------------------------------------------------------------------
+9.6 DONATION ENDPOINTS
+--------------------------------------------------------------------------------
+
+POST   /api/resources/donate/
+       Initiate a donation. No auth required.
+       Body: {incident_id, amount_naira, fund_choice, donor_name,
+              donor_email, donor_phone}
+       Creates Donation record (PENDING), calls Paystack initialize API,
+       returns {payment_url} for redirect to Paystack hosted page.
+
+POST   /api/resources/donate/verify/
+       Paystack webhook callback. Validates Paystack signature.
+       Updates Donation status to SUCCESS or FAILED.
+       If SUCCESS: updates incident.total_donations_kobo and donation_count.
+       If fund_choice is RESPONDER: splits payout to responder sub-accounts.
+       Sends donor a WhatsApp thank-you if phone was provided.
+
+GET    /api/resources/donations/?incident={id}
+       Public donation summary for an incident.
+       Returns: {total_naira, donation_count, fund_breakdown}
+       Does NOT expose individual donor details.
+
+--------------------------------------------------------------------------------
+9.7 SUBSCRIPTION ENDPOINTS
+--------------------------------------------------------------------------------
+
+POST   /api/subscriptions/
+       Create a subscription. No auth.
+       Body: {whatsapp_number, label, location_type, location_lat,
+              location_lng, alert_radius_km, incident_types}
+
+GET    /api/subscriptions/?phone_hash={hash}
+       List all subscriptions for a phone number.
+
+PATCH  /api/subscriptions/{id}/
+       Update label, radius, or is_active status.
+
+DELETE /api/subscriptions/{id}/
+       Delete a saved location.
+
+--------------------------------------------------------------------------------
+9.8 ANALYTICS ENDPOINTS
+--------------------------------------------------------------------------------
+
+GET    /api/analytics/summary/     JWT required. Params: 7d, 30d, 90d.
+GET    /api/analytics/zones/       JWT required. Counts per zone_name.
+GET    /api/analytics/trends/      JWT required. Daily counts over range.
+GET    /api/analytics/donations/   JWT required. Total raised, per fund.
+GET    /api/analytics/subscribers/ JWT required. Total count, alerts sent.
+
+--------------------------------------------------------------------------------
+9.9 AUTH
+--------------------------------------------------------------------------------
+
+POST   /api/auth/token/
+POST   /api/auth/token/refresh/
+
+--------------------------------------------------------------------------------
+9.10 WEBSOCKET (sirenapp/asgi.py)
+--------------------------------------------------------------------------------
+
+import os
+from django.core.asgi import get_asgi_application
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
+from django.urls import path
+from apps.incidents.consumers import IncidentConsumer
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'sirenapp.settings')
+django_asgi_app = get_asgi_application()
+
+application = ProtocolTypeRouter({
+    'http': django_asgi_app,
+    'websocket': AuthMiddlewareStack(
+        URLRouter([
+            path('ws/incidents/', IncidentConsumer.as_asgi()),
+        ])
+    ),
+})
+
+# WebSocket message format on every incident status change:
+# {
+#   "type": "incident.update",
+#   "incident_id": "uuid-string",
+#   "status": "VERIFIED",
+#   "incident_type": "FIRE",
+#   "severity": "HIGH",
+#   "zone_name": "Surulere",
+#   "lat": 6.5123,
+#   "lng": 3.3456,
+#   "vouch_count": 3,
+#   "total_donations_naira": 45000,
+#   "resource_count": 4,
+#   "updated_at": "2026-03-09T14:23:00Z"
+# }
+
+================================================================================
+SECTION 10 — CLAUDE AI VERIFICATION TASK (apps/incidents/tasks.py)
+================================================================================
+
+import json, re
+from celery import shared_task
+from django.conf import settings
+import anthropic
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=10)
+def verify_incident_ai(self, incident_id: str):
+    """
+    Calls Claude to classify and verify an incident.
+    Updates status. Triggers all downstream notifications if VERIFIED.
+    """
+    from apps.incidents.models import Incident
+
+    incident = Incident.objects.get(id=incident_id)
+
+    prompt = f"""You are an emergency verification system for Lagos, Nigeria.
+Analyse this report and respond ONLY with valid JSON. No markdown. No explanation.
+
+Report: {incident.description}
+Location text: {incident.address_text}
+
+Return this exact JSON:
+{{
+  "eligible": true or false,
+  "rejection_reason": "why rejected, or null if eligible",
+  "incident_type": "FIRE|FLOOD|COLLAPSE|RTA|EXPLOSION|DROWNING|HAZARD or null",
+  "severity": "LOW|MEDIUM|HIGH|CRITICAL",
+  "ai_confidence": 0.0 to 1.0,
+  "fraud_score": 0.0 to 1.0,
+  "suggested_skills": ["list of skill codes"],
+  "reasoning": "one sentence"
+}}
+
+Only these types qualify: FIRE FLOOD COLLAPSE RTA EXPLOSION DROWNING HAZARD
+fraud_score above 0.7 means the report looks fake."""
+
+    try:
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model=settings.ANTHROPIC_MODEL,
+            max_tokens=1024,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        text = message.content[0].text.strip()
+        text = re.sub(r'```json|```', '', text).strip()  # Strip code fences
+        result = json.loads(text)
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+    incident.ai_raw_response = result
+    incident.ai_confidence   = result.get('ai_confidence', 0.0)
+    incident.fraud_score     = result.get('fraud_score', 0.0)
+
+    if not result.get('eligible') or incident.fraud_score > 0.7:
+        _transition(incident, 'REJECTED', 'AI', result.get('rejection_reason', ''))
+        incident.save()
+        _notify_rejected(incident, result.get('rejection_reason', ''))
+        return
+
+    incident.incident_type = result.get('incident_type', '')
+    incident.severity      = result.get('severity', 'MEDIUM')
+    incident.set_vouch_threshold()
+
+    if incident.ai_confidence >= 0.75:
+        _transition(incident, 'VERIFIED', 'AI',
+                    f'Auto-verified. Confidence: {incident.ai_confidence:.2f}')
+        incident.save()
+        _post_verification_actions(incident)
+    elif incident.ai_confidence >= 0.4:
+        _transition(incident, 'VERIFYING', 'AI', 'Awaiting community vouches')
+        incident.save()
+        _notify_verifying(incident)
+    else:
+        _transition(incident, 'REJECTED', 'AI', 'Insufficient confidence')
+        incident.save()
+
+
+def _transition(incident, new_status, actor, note=''):
+    from apps.incidents.models import ResponseLog
+    from apps.incidents.consumers import broadcast_update
+    ResponseLog.objects.create(
+        incident=incident, from_status=incident.status,
+        to_status=new_status, actor=actor, note=note
+    )
+    incident.status = new_status
+    broadcast_update(incident)  # Push to all WebSocket clients
+
+
+def _post_verification_actions(incident):
+    from apps.whatsapp.tasks import notify_reporter_verified, post_community_announcement
+    from apps.responders.tasks import notify_nearest_responders
+    from apps.organisations.tasks import notify_nearest_organisations
+    from apps.subscriptions.tasks import notify_location_subscribers
+
+    notify_reporter_verified.delay(str(incident.id))
+    post_community_announcement.delay(str(incident.id))
+    if incident.severity in ['CRITICAL', 'HIGH', 'MEDIUM']:
+        notify_nearest_responders.delay(str(incident.id))
+    notify_nearest_organisations.delay(str(incident.id))
+    notify_location_subscribers.delay(str(incident.id))
+
+================================================================================
+SECTION 11 — WHATSAPP FLOWS
+================================================================================
+
+--------------------------------------------------------------------------------
+11.1 INBOUND MESSAGE ROUTER (apps/whatsapp/handlers.py)
+--------------------------------------------------------------------------------
+
+def route_inbound(from_number, body, media_urls, location):
+    body_upper = body.strip().upper()
+
+    # Responder commands
+    if body_upper in ['YES', 'NO', 'ONSCENE', 'DONE', 'HELP']:
+        return handle_responder_reply(from_number, body_upper)
+
+    # Organisation commands
+    if body_upper in ['ACCEPT', 'DECLINE', 'CALL']:
+        return handle_org_reply(from_number, body_upper)
+
+    # Registration
+    if body_upper == 'RESPONDER':
+        return start_responder_registration(from_number)
+    if body_upper == 'REGISTER ORG':
+        return start_org_registration(from_number)
+
+    # Location subscriptions
+    if body_upper == 'WATCH':
+        return start_subscription_flow(from_number)
+    if body_upper == 'MY ALERTS':
+        return show_subscriptions(from_number)
+    if body_upper.startswith('STOP'):
+        return handle_stop_command(from_number, body)
+
+    # Vouching
+    if body_upper.startswith('VOUCH'):
+        return handle_vouch_command(from_number, body)
+
+    # Location share
+    if location and location.get('latitude'):
+        return handle_location_share(from_number, location, body)
+
+    # Onboarding in progress
+    if is_onboarding(from_number):
+        return handle_onboarding_step(from_number, body)
+
+    # Default: treat as emergency report
+    return create_incident_from_message(from_number, body, media_urls, location)
+
+--------------------------------------------------------------------------------
+11.2 EMERGENCY REPORT FLOW
+--------------------------------------------------------------------------------
+
+USER:   "Fire! Smoke from 3rd floor 14 Adewale Street Surulere"
+        [Shares WhatsApp live location]
+
+SIREN:  "Received — verifying now.
+        Usually takes under 90 seconds.
+        I will update you immediately."
+
+[~90 seconds — Celery + Claude — result: VERIFIED, HIGH]
+
+SIREN:  "✅ VERIFIED — Fire incident, Surulere
+
+        Severity: HIGH
+
+        👤 Community responder notified — 4 mins away
+        🏥 MedPlus Clinic alerted — 400m from scene
+        🔴 Lagos Fire Service notified
+
+        Track and support this incident:
+        siren.ng/track/abc123
+
+        Are you safe? Reply SAFE or HELP"
+
+USER:   "SAFE"
+
+SIREN:  "Glad you are safe. Stay away from the building.
+        I will keep you updated."
+
+[When resolved]
+
+SIREN:  "✅ RESOLVED — Fire contained, Surulere
+
+        Fire Service arrived. Community responder on scene in 4 minutes.
+        Community raised ₦45,000 for the affected family.
+        3 resource items contributed (ladder, fire extinguisher, first aid kit).
+
+        Your report helped coordinate this response. Thank you."
+
+NOTE: The tracking link brings people to the web for the full experience
+(map, resource board, donation, vouching). WhatsApp starts them, the site
+deepens engagement. This is intentional.
+
+--------------------------------------------------------------------------------
+11.3 VOUCHING FLOW
+--------------------------------------------------------------------------------
+
+WhatsApp Community announcement group reaction:
+- When incident is VERIFIED, Siren posts to the zone's Community group
+- Members react with ❤️ to vouch
+- Twilio captures the reaction and calls the vouch endpoint
+- One vouch per phone number per incident
+
+Direct WhatsApp vouch:
+- User messages Siren: "VOUCH abc123" (incident short ID or full UUID)
+- Siren confirms: "✅ Your vouch has been counted for this incident.
+                   See the live update: siren.ng/track/abc123"
+
+Web vouch (full experience):
+- User lands on incident page from tracking link
+- Clicks Vouch button on the page
+- One vouch per session
+
+All three paths hit the same POST /api/incidents/{id}/vouch/ endpoint.
+
+--------------------------------------------------------------------------------
+11.4 RESOURCE BOARD — WHATSAPP ENTRY POINT
+--------------------------------------------------------------------------------
+
+When someone messages Siren about a live incident and wants to help:
+
+SIREN:  "There is an active incident near you.
+
+        People are coordinating resources:
+        🪜 6-foot ladder — 2 people said they can bring one
+        🚗 Transport to hospital — NEEDED
+        💊 First aid kit — CLAIMED
+
+        To see the full board and add what you can bring:
+        siren.ng/track/abc123
+
+        Or reply BRING [item] and I'll add you to the list"
+
+NOTE: Bring command on WhatsApp creates a basic claim. The full
+resource board experience (viewing all items, claiming, confirming
+arrival) is on the website. WhatsApp is the entry point.
+
+--------------------------------------------------------------------------------
+11.5 DONATION ENTRY — WHATSAPP
+--------------------------------------------------------------------------------
+
+After incident is VERIFIED and active, Siren sends this to people
+who have engaged with the incident (vouchers, community members):
+
+SIREN:  "🏠 Families affected by the Surulere fire need support.
+
+        You can help right now:
+        siren.ng/donate/abc123
+
+        Choose where your money goes:
+        🏥 Victim Relief — direct to the affected family
+        👤 Responder Appreciation — split to responders on scene
+        🚨 Emergency Response Fund — keeps Siren running
+
+        Every contribution is processed securely via Paystack."
+
+Donor is brought to the website to complete payment. Paystack handles
+the transaction. After success, if phone was provided:
+
+SIREN:  "✅ Thank you [Name]. Your ₦5,000 donation to Victim Relief
+        has been received. The affected family has been notified.
+
+        siren.ng/track/abc123"
+
+--------------------------------------------------------------------------------
+11.6 LOCATION SUBSCRIPTION FLOW (WATCH command)
+--------------------------------------------------------------------------------
+
+USER:   "WATCH"
+
+SIREN:  "I will alert you when emergencies happen near locations you care about.
+
+        What do you want to call this location?
+        Examples: My house, Timi school, Ogun land, Mama's compound"
+
+USER:   "Timi school"
+
+SIREN:  "What type of location is this?
+
+        Reply with a number:
+        1. Home
+        2. School / Child location
+        3. Land / Property
+        4. Office
+        5. Family member location
+        6. Other"
+
+USER:   "2"
+
+SIREN:  "Now share the location of Timi school.
+
+        Tap the paperclip icon in WhatsApp,
+        select Location, then share it here."
+
+USER:   [Shares WhatsApp location pin]
+
+SIREN:  "How far away should an incident be to alert you?
+
+        1. 500 metres
+        2. 1 km
+        3. 2 km
+        4. 5 km"
+
+USER:   "2"
+
+SIREN:  "✅ Saved — Timi school (School/Child location)
+
+        I will alert you when a verified incident happens within 1km.
+
+        To see all your saved locations: reply MY ALERTS
+        To save another location: reply WATCH
+        To stop alerts for this location: reply STOP Timi school"
+
+--------------------------------------------------------------------------------
+11.7 SUBSCRIPTION ALERT MESSAGE
+--------------------------------------------------------------------------------
+
+SIREN:  "🔴 SIREN ALERT — Timi school
+
+        Fire Outbreak
+        Severity: HIGH
+        Location: Adewale Street, Surulere
+        Distance from Timi school: 0.4km
+
+        Community is responding.
+        People are contributing resources.
+
+        Full details and support options:
+        siren.ng/track/abc123
+
+        Reply STOP Timi school to pause alerts for this location."
+
+--------------------------------------------------------------------------------
+11.8 RESPONDER NOTIFICATION
+--------------------------------------------------------------------------------
+
+SIREN:  "🚨 INCIDENT NEAR YOU
+
+        Road Traffic Accident — injuries reported
+        580m from you — Eko Bridge approach
+
+        Medical skills needed.
+        Will you respond?
+
+        Reply YES or NO
+        (3 minutes to accept)"
+
+USER:   "YES"
+
+SIREN:  "Thank you Bola.
+
+        Head to Eko Bridge approach
+        Scene is on the right, 200m after Total filling station
+
+        Maps: maps.google.com/?q=6.4550,3.3841
+
+        You are the nearest medical responder.
+
+        Reply ONSCENE when you arrive
+        Reply HELP if you need backup"
+
+USER:   "ONSCENE"
+
+SIREN:  "✅ Logged — Bola on scene. 4 minutes from notification.
+
+        Community has raised ₦18,000 in responder appreciation.
+        Reply DONE when finished."
+
+--------------------------------------------------------------------------------
+11.9 ORGANISATION NOTIFICATION
+--------------------------------------------------------------------------------
+
+SIREN:  "🔴 VERIFIED INCIDENT NEARBY
+
+        Building Collapse — possible casualties
+        420m from your clinic
+
+        Can you receive?
+
+        Reply ACCEPT — capacity available
+        Reply DECLINE — cannot receive now
+        Reply CALL — need more information"
+
+ORG:    "ACCEPT"
+
+SIREN:  "✅ Logged — MedPlus Clinic accepting.
+
+        Responder on scene directed to your clinic.
+        Community raised ₦12,000 for victim relief.
+        Update us if capacity changes."
+
+================================================================================
+SECTION 12 — DONATION FLOW (PAYSTACK)
+================================================================================
+
+--------------------------------------------------------------------------------
+12.1 HOW PAYSTACK SPLITS WORK
+--------------------------------------------------------------------------------
+
+Siren uses Paystack sub-accounts to automatically split every donation
+at transaction level. No manual money movement.
+
+Setup (do once in Paystack dashboard):
+1. Create Siren main account — this receives the platform percentage
+2. Create sub-account for each verified responder when they join
+3. Create a general "Victim Relief" holding sub-account
+
+Split logic per fund_choice:
+- PLATFORM: 100% to Siren main account
+- RESPONDER: Siren takes 10%. Remaining 90% split equally among
+  responders who have marked ONSCENE for this incident.
+  If no responders on scene yet: hold in Siren account, redistribute
+  when responders confirm on scene.
+- VICTIM: Siren takes 10%. 90% to Victim Relief holding account.
+  Released when reporter sets up recipient bank details.
+  If no recipient set within 48 hours: donor notified, can redirect.
+
+--------------------------------------------------------------------------------
+12.2 PAYSTACK INTEGRATION FLOW
+--------------------------------------------------------------------------------
+
+Step 1 — Frontend initiates:
+  POST /api/resources/donate/
+  Body: {incident_id, amount_naira, fund_choice, donor_email, donor_phone}
+  Backend creates Donation record (PENDING), generates paystack_reference,
+  calls Paystack initialize API, returns {payment_url}
+
+Step 2 — Frontend redirects donor to payment_url (Paystack hosted page)
+
+Step 3 — Donor completes payment on Paystack
+
+Step 4 — Paystack sends webhook to POST /api/resources/donate/verify/
+  Backend validates Paystack signature (use X-Paystack-Signature header)
+  Updates Donation.status to SUCCESS
+  Updates Incident.total_donations_kobo
+  Triggers responder payout split if fund_choice is RESPONDER
+  Sends thank-you WhatsApp to donor if phone provided
+
+Step 5 — Frontend callback URL /donate/success?ref={reference}
+  Calls GET /api/resources/donations/?incident={id} to show updated total
+
+================================================================================
+SECTION 13 — FRONTEND PAGES
+================================================================================
+
+--------------------------------------------------------------------------------
+13.1 DESIGN TOKENS
+--------------------------------------------------------------------------------
+
+Primary red:    #C0392B — all alerts, active badges, primary buttons
+Background:     #FAFAFA
+Card surface:   #FFFFFF
+Text primary:   #0D0D0D
+Text body:      #4A4A4A
+Text muted:     #9E9E9E
+Success green:  #1A6B3C — resolved, safe, confirmed, arrived
+Warning amber:  #D35400 — verifying, pending, claimed
+Border:         #E8E8E8
+Font:           Inter — import from Google Fonts
+
+Severity badges:
+  CRITICAL = red bg, white text, CSS pulse animation
+  HIGH     = red bg, white text
+  MEDIUM   = amber bg, white text
+  LOW      = yellow bg, dark text
+
+Status badges:
+  VERIFIED        = light blue bg, dark blue text
+  RESPONDING      = light green bg, dark green text, animated pulse dot
+  VERIFYING       = light yellow bg, amber text, animated pulse dot
+  RESOLVED        = light green bg, dark green text
+  AGENCY_NOTIFIED = light purple bg, purple text
+  REJECTED        = light grey bg, muted text
+
+Resource status badges:
+  NEEDED  = light red bg, red text
+  CLAIMED = amber bg, dark text
+  ARRIVED = green bg, white text, strikethrough on item label
+
+--------------------------------------------------------------------------------
+13.2 PAGE ROUTES (frontend/src/App.tsx)
+--------------------------------------------------------------------------------
+
+Public routes (no login):
+  /                   HomePage
+  /map                MapPage
+  /feed               FeedPage
+  /track/:id          TrackPage (reporter's live incident view)
+  /report             ReportPage (web form)
+  /join               JoinPage (become a responder or register org)
+  /watch              WatchPage (location subscription management)
+  /donate/:id         DonatePage (donation for a specific incident)
+  /donate/success     DonateSuccessPage
+  /organisations      OrgsPage
+
+Dashboard routes (JWT required):
+  /login              LoginPage
+  /dashboard          DashboardHome
+  /dashboard/incidents           DashboardIncidents
+  /dashboard/incidents/:id       DashboardIncidentDetail
+  /dashboard/analytics           DashboardAnalytics
+  /dashboard/responders          DashboardResponders
+  /dashboard/organisations       DashboardOrgs
+  /dashboard/subscribers         DashboardSubscribers
+  /dashboard/donations           DashboardDonations
+
+--------------------------------------------------------------------------------
+13.3 PAGE SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+HOME PAGE (/)
+  - Hero section with live active incident counter badge (updates via API poll)
+  - Large WhatsApp CTA: "Report an Emergency" opens wa.me/[SIREN_NUMBER]
+  - Secondary CTA: "Save a Location" links to /watch
+  - 3-step explainer: Report via WhatsApp → AI Verifies → Community Responds
+  - Zone grid: 8-10 Lagos areas, each with active incident count and join link
+  - Live ticker: last 5 resolved incidents with response time and donation total
+  - Responder registration CTA
+  - Organisation registration CTA
+  - Recent donations feed: "Anonymous donated ₦5,000 to fire victims — 3 mins ago"
+
+MAP PAGE (/map)
+  - Full-screen react-leaflet map. Import leaflet/dist/leaflet.css in main.tsx.
+  - OpenStreetMap tiles. Center [6.5244, 3.3792] Lagos. Zoom 12.
+  - Incident pins: CircleMarker, colour by severity. CRITICAL and HIGH pulse.
+  - Organisation pins: distinct icon by org type.
+  - Filter bar: All / FIRE / FLOOD / COLLAPSE / RTA / EXPLOSION / DROWNING / HAZARD
+  - Popup on pin click: type, severity, status, vouch count, donation total,
+    Vouch button, "View full details" link to /track/:id
+  - WebSocket connection. Pins update in real time without page refresh.
+  - Resource count badge on pins with active resource board items.
+
+FEED PAGE (/feed)
+  - Paginated incident list. 20 per page. Load more button.
+  - Filters: zone_name, incident_type, severity, status
+  - IncidentCard:
+      Top row: severity badge | type icon + label | status badge | time ago
+      Middle: description (2 lines, expand on click)
+      Bottom: location text | vouch count | donation total | Vouch button
+      Expanded view: ResponseLog timeline + resource board summary
+  - Share button per card: copies siren.ng/track/:id to clipboard
+
+TRACK PAGE (/track/:id)
+  - This is the most important public page. Reporter lands here from WhatsApp.
+  - No login needed.
+  - Top: Siren logo + "Your report is being tracked"
+  - Large status badge — updates live via WebSocket
+  - ResponseLog timeline — live updates
+  - LiveResponseCard: "Bola (Nurse) accepted — 4 mins away"
+  - Mini Leaflet map with incident pin
+  - RESOURCE BOARD SECTION:
+      Visible as soon as incident is VERIFIED
+      Shows all suggested items with status badges (NEEDED / CLAIMED / ARRIVED)
+      Each item shows: label, category, claim count
+      "3 people said they can bring a 6-foot ladder"
+      ARRIVED items show with strikethrough and green tick
+      "Add what you can bring" button opens suggest modal (no login)
+      Suggest form: category dropdown, label text input, your name (optional)
+      Each item has "I can bring this" button — opens claim modal
+      Claim form: name (optional), phone (optional for WhatsApp contact)
+      Reporter sees "Confirm arrived" button next to each CLAIMED item
+  - DONATION SECTION:
+      Visible as soon as incident is VERIFIED
+      Shows total raised and donation count
+      Three fund choice cards:
+        🏥 Victim Relief — "Help the affected family directly"
+        👤 Responder Appreciation — "Thank the people who showed up"
+        🚨 Emergency Response Fund — "Keep Siren running for the next emergency"
+      "Donate" button on each card opens donate modal
+      Donate modal: amount input (min ₦500), donor name optional, email/phone
+      Submit redirects to /donate/:id?fund={choice}
+  - "Are you safe?" button if user is the reporter (identified by session)
+  - Share button: copies URL for others to view and contribute
+
+REPORT PAGE (/report)
+  - 4-step form. Completable in under 60 seconds. No account needed.
+  - Step 1: Pick incident type — 7 large icon buttons
+  - Step 2: Location — "Use my location" button (Geolocation API) + address text
+  - Step 3: Describe — textarea, 500 char max, placeholder "What are you seeing?"
+  - Step 4: Photo — optional file upload
+  - Submit: POST /api/ingest/web/ then redirect to /track/:id
+
+JOIN PAGE (/join)
+  - Two columns: Responder | Organisation
+  - Each column: what you get, 3-step how it works, Register via WhatsApp button
+  - Responder button opens WhatsApp with prefilled text: RESPONDER
+  - Org button opens WhatsApp with prefilled text: REGISTER ORG
+
+WATCH PAGE (/watch)
+  - Intro: "Get alerted when emergencies happen near places you care about"
+  - Example use cases: child's school, elderly parent's home, property investments
+  - 3 steps: Save a location / Choose your radius / Get WhatsApp alerts
+  - Primary CTA: "Send WATCH to Siren" button — opens WhatsApp
+  - Web form alternative (no WhatsApp needed):
+      Phone number field (to receive alerts)
+      Label field (e.g. "Timi school")
+      Location type dropdown
+      Mini Leaflet map — user drops a pin or uses Geolocation
+      Alert radius selector: 500m / 1km / 2km / 5km
+      Incident type filter: All types or select specific ones
+      Submit: POST /api/subscriptions/
+  - Below form: sample alert message preview showing what they will receive
+  - "Manage your saved locations" section:
+      Enter phone number to retrieve subscriptions
+      List of active subscriptions with pause/delete options
+
+DONATE PAGE (/donate/:id)
+  - Loaded from TrackPage donate modal or donation link
+  - Incident summary at top: type, severity, zone, status
+  - Three fund choice cards (same as TrackPage)
+  - Amount input with quick-select buttons: ₦500 / ₦1,000 / ₦2,500 / ₦5,000 / Custom
+  - Donor name (optional), email (required for Paystack), phone (optional)
+  - "Donate with Paystack" button
+  - On submit: POST /api/resources/donate/ → get payment_url → redirect to Paystack
+
+DONATE SUCCESS PAGE (/donate/success)
+  - "Thank you [name]" headline
+  - Donation amount, fund choice, incident summary
+  - Updated donation total for this incident
+  - Share button: "Help raise more — share this incident"
+  - Link back to /track/:id
+
+ORGANISATIONS PAGE (/organisations)
+  - Small Leaflet map showing all VERIFIED org pins by type
+  - Filter by org_type and zone_name
+  - OrgCard list: name, type badge, zone, hours, Verified Partner badge
+  - Click card: shows total responses and avg response time
+
+DASHBOARD HOME (/dashboard)
+  - JWT required
+  - 4 stat cards: active incidents now / today total / responders available / total donated today
+  - Active incidents table: type, severity, zone, time, vouch count, AI confidence,
+    donation total, action buttons (Dispatch / Resolve)
+  - Real-time sidebar: WebSocket status feed scrolling
+
+DASHBOARD INCIDENT DETAIL (/dashboard/incidents/:id)
+  - Full incident panel
+  - Leaflet map with GPS pin
+  - AI result: confidence score, fraud score, reasoning from Claude
+  - ResponseLog timeline
+  - Resource board admin view: confirm arrivals, remove inappropriate suggestions
+  - Donation breakdown: total, per fund, individual donations
+  - Responder dispatch status: who was notified, accepted/declined, on scene time
+  - Org notification status
+  - Action buttons: Dispatch / Resolve / Flag as False
+
+DASHBOARD ANALYTICS (/dashboard/analytics)
+  - Date range picker: 7d / 30d / 90d
+  - Bar chart: incidents by type (Recharts)
+  - Line chart: daily incident count trend (Recharts)
+  - Bar chart: incidents by zone (Recharts)
+  - Stat cards: avg response times, false positive rate
+  - Donation chart: total raised per day, per fund breakdown
+  - Subscription chart: new subscribers per day, alerts sent
+
+DASHBOARD DONATIONS (/dashboard/donations)
+  - Total raised all time and this month
+  - Per fund breakdown
+  - Individual donation list with status
+  - Pending victim relief: donations waiting for recipient bank details
+  - Paystack sub-account balance summary
+
+DASHBOARD SUBSCRIBERS (/dashboard/subscribers)
+  - Total subscribers, active subscriptions count
+  - Alerts sent this month
+  - Most-watched zones
+  - Subscription location map (dots showing density)
+
+--------------------------------------------------------------------------------
+13.4 MAP SETUP (important notes)
+--------------------------------------------------------------------------------
+
+// frontend/src/main.tsx
+// This import MUST be at the top or the map renders with no styles
+import 'leaflet/dist/leaflet.css'
+
+// In MapPage.tsx
+<MapContainer center={[6.5244, 3.3792]} zoom={12} style={{height:'100vh', width:'100%'}}>
+  <TileLayer
+    url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+    attribution='© OpenStreetMap contributors'
+  />
+  {incidents.map(inc => (
+    <CircleMarker
+      key={inc.id}
+      center={[inc.location_lat, inc.location_lng]}
+      radius={inc.severity === 'CRITICAL' ? 16 : inc.severity === 'HIGH' ? 12 : 8}
+      color={inc.severity === 'CRITICAL' || inc.severity === 'HIGH' ? '#C0392B' : '#D35400'}
+    >
+      <Popup>
+        <strong>{inc.incident_type}</strong><br/>
+        {inc.severity} — {inc.status}<br/>
+        {inc.donation_count > 0 && <span>₦{inc.total_donations_naira.toLocaleString()} raised</span>}
+        <br/><a href={`/track/${inc.id}`}>View full details</a>
+      </Popup>
+    </CircleMarker>
+  ))}
+</MapContainer>
+
+================================================================================
+SECTION 14 — DJANGO ADMIN
+================================================================================
+
+# apps/incidents/admin.py
+from django.contrib import admin
+from .models import Incident, ResponseLog, VouchRecord
+
+@admin.register(Incident)
+class IncidentAdmin(admin.ModelAdmin):
+    list_display  = ['id', 'incident_type', 'severity', 'status', 'zone_name',
+                     'vouch_count', 'ai_confidence', 'fraud_score',
+                     'total_donations_kobo', 'created_at']
+    list_filter   = ['status', 'incident_type', 'severity', 'source']
+    search_fields = ['description', 'address_text', 'zone_name']
+    ordering      = ['-created_at']
+    readonly_fields = ['id', 'reporter_hash', 'ai_raw_response', 'created_at', 'updated_at']
+    actions       = ['mark_verified', 'mark_resolved', 'mark_rejected']
+
+    def mark_verified(self, req, qs): qs.update(status='VERIFIED')
+    def mark_resolved(self, req, qs): qs.update(status='RESOLVED')
+    def mark_rejected(self, req, qs): qs.update(status='REJECTED')
+
+@admin.register(ResponseLog)
+class ResponseLogAdmin(admin.ModelAdmin):
+    list_display    = ['incident', 'from_status', 'to_status', 'actor', 'created_at']
+    readonly_fields = ['incident', 'from_status', 'to_status', 'actor', 'note', 'created_at']
+
+
+# apps/resources/admin.py
+from django.contrib import admin
+from .models import ResourceItem, ResourceClaim, Donation
+
+@admin.register(ResourceItem)
+class ResourceItemAdmin(admin.ModelAdmin):
+    list_display = ['label', 'category', 'status', 'incident', 'created_at']
+    list_filter  = ['status', 'category']
+    actions      = ['mark_arrived']
+
+    def mark_arrived(self, req, qs):
+        from django.utils import timezone
+        qs.update(status='ARRIVED', confirmed_at=timezone.now())
+
+@admin.register(Donation)
+class DonationAdmin(admin.ModelAdmin):
+    list_display    = ['incident', 'donor_name', 'amount_kobo', 'fund_choice',
+                       'status', 'created_at']
+    list_filter     = ['status', 'fund_choice']
+    readonly_fields = ['paystack_reference', 'paystack_response', 'created_at']
+
+
+# apps/subscriptions/admin.py
+from django.contrib import admin
+from .models import LocationSubscription, SubscriptionAlert
+
+@admin.register(LocationSubscription)
+class LocationSubscriptionAdmin(admin.ModelAdmin):
+    list_display = ['label', 'location_type', 'alert_radius_km', 'is_active', 'created_at']
+    list_filter  = ['location_type', 'is_active']
+
+================================================================================
+SECTION 15 — BUILD PHASES
+================================================================================
+
+Build in this exact order. Do not start a phase until the previous one works.
+Test each phase before moving forward.
+
+================================================================================
+PHASE 1 — INCIDENTS APP
+Goal: Django running, incidents model migrated, Claude AI verifying incidents,
+      admin working, WebSocket broadcasting status changes.
+================================================================================
+
+Step 1:  Confirm settings.py matches Section 4 exactly.
+         DATABASE engine must be 'django.db.backends.postgresql' not postgis.
+
+Step 2:  Create utils/ folder. Create utils/__init__.py.
+         Create utils/distance.py from Section 6.
+
+Step 3:  Create apps/ folder and apps/__init__.py.
+         Create apps/incidents/ with all files:
+         __init__.py, apps.py, models.py, serializers.py,
+         views.py, urls.py, consumers.py, tasks.py, admin.py
+
+Step 4:  Write apps/incidents/models.py from Section 7.1 exactly.
+
+Step 5:  Write sirenapp/celery.py from Section 8.
+         Update sirenapp/__init__.py from Section 8.
+
+Step 6:  Run: python manage.py makemigrations incidents
+         Run: python manage.py migrate
+
+Step 7:  Write apps/incidents/admin.py from Section 14.
+         Run: python manage.py createsuperuser
+         Test: python manage.py runserver
+               Visit /admin/ — Incident, ResponseLog, VouchRecord tables visible.
+
+Step 8:  Write apps/incidents/tasks.py from Section 10.
+         This is the Claude AI verification task.
+
+Step 9:  Write apps/incidents/consumers.py
+         WebSocket consumer. On every _transition() call it broadcasts
+         the incident update JSON defined in Section 9.10 to all connected clients.
+
+Step 10: Write apps/incidents/serializers.py
+         IncidentSerializer: all Incident fields.
+         IncidentDetailSerializer: Incident + nested response_logs + vouch_count.
+
+Step 11: Write apps/incidents/views.py and apps/incidents/urls.py
+         All incident endpoints from Section 9.2.
+
+Step 12: Write sirenapp/asgi.py from Section 9.10.
+
+Step 13: Update sirenapp/urls.py with incident routes from Section 9.1.
+
+Step 14: TEST PHASE 1:
+         POST to /api/ingest/web/ with body:
+           {"description": "Fire at Lagos Island building", "address_text": "Lagos Island"}
+         Check: incident created in admin
+         Check: Celery task ran (CELERY_ALWAYS_EAGER=True so it runs inline)
+         Check: Claude returned a result
+         Check: incident status updated to VERIFIED or VERIFYING
+         Check: ResponseLog created
+
+================================================================================
+PHASE 2 — WHATSAPP APP
+Goal: WhatsApp message creates incident, reporter gets confirmation with
+      tracking link containing the full incident URL.
+================================================================================
+
+Step 1:  Create apps/whatsapp/ with all files.
+
+Step 2:  Write apps/whatsapp/views.py — Twilio webhook handler.
+         MUST validate X-Twilio-Signature header.
+         Responds 200 immediately. Calls route_inbound() then queues tasks.
+
+Step 3:  Write apps/whatsapp/handlers.py from Section 11.1.
+
+Step 4:  Write apps/whatsapp/templates.py
+         Every outbound message string as a Python function.
+         Functions take incident or context as argument and return string.
+         All message text from Section 11 flows through here.
+
+Step 5:  Write apps/whatsapp/tasks.py with these tasks:
+         - send_whatsapp_text(to_number, message) — base Twilio send
+         - notify_reporter_verified(incident_id) — sends tracking link
+         - notify_reporter_rejected(incident_id, reason)
+         - notify_reporter_verifying(incident_id)
+         - post_community_announcement(incident_id) — posts to zone group
+
+Step 6:  Write apps/whatsapp/urls.py. Add to sirenapp/urls.py.
+
+Step 7:  Set Twilio sandbox webhook URL to your ngrok or Railway URL:
+         https://[your-url]/api/ingest/whatsapp/
+
+Step 8:  TEST PHASE 2:
+         Send WhatsApp message to Siren number
+         Check: incident created in admin
+         Check: Claude verifies
+         Check: reporter receives WhatsApp confirmation with tracking link
+         Open tracking link in browser
+         Check: incident page shows correct status
+
+================================================================================
+PHASE 3 — RESPONDERS AND ORGANISATIONS
+Goal: Nearest verified responder and org notified when incident is VERIFIED.
+================================================================================
+
+Step 1:  Create apps/responders/ with all files.
+         Write models.py from Section 7.2.
+         Run: python manage.py makemigrations responders && python manage.py migrate
+
+Step 2:  Write apps/responders/tasks.py
+         notify_nearest_responders(incident_id):
+           - Get incident GPS
+           - Call haversine_query from utils/distance.py
+             table='responders_responder', lat='home_lat', lng='home_lng',
+             extra_filters="AND status='VERIFIED' AND is_available=TRUE"
+           - For each result: create ResponderDispatch, send WhatsApp notification
+
+Step 3:  Create apps/organisations/ with all files.
+         Write models.py from Section 7.3.
+         Run: python manage.py makemigrations organisations && python manage.py migrate
+
+Step 4:  Write apps/organisations/tasks.py
+         notify_nearest_organisations(incident_id):
+           - Same pattern as responders using haversine_query
+           - extra_filters: "AND status='VERIFIED'"
+
+Step 5:  Wire both tasks into _post_verification_actions in incidents/tasks.py.
+
+Step 6:  Write serializers, views, urls for both apps. Add to sirenapp/urls.py.
+
+Step 7:  Add responder command handlers to whatsapp/handlers.py:
+         handle_responder_reply() — routes YES/NO/ONSCENE/DONE
+         On YES: update dispatch accepted=True, send directions
+         On ONSCENE: update on_scene_at, send acknowledgement
+         On DONE: update completed_at, send thank-you with community stats
+
+Step 8:  Add org reply handler: handle_org_reply() — routes ACCEPT/DECLINE/CALL
+
+Step 9:  TEST PHASE 3:
+         Create an incident with GPS coordinates
+         Create a test verified responder with coordinates nearby
+         Verify: responder receives WhatsApp notification
+         Reply YES — verify dispatch updated
+         Reply ONSCENE — verify on_scene_at timestamp set
+         Verify: organisation also notified if one is nearby
+
+================================================================================
+PHASE 4 — RESOURCES APP (Resource Board + Donations)
+Goal: Live resource board works on incident page.
+      Donations processed via Paystack.
+================================================================================
+
+Step 1:  Create apps/resources/ with all files.
+         Write models.py from Section 7.4 (both ResourceItem/Claim and Donation).
+         Run: python manage.py makemigrations resources && python manage.py migrate
+
+Step 2:  Write serializers:
+         ResourceItemSerializer: all fields + claim_count (annotated count)
+         ResourceClaimSerializer
+         DonationSerializer
+         DonationSummarySerializer: total_naira, count, fund_breakdown
+
+Step 3:  Write views and urls for all resource endpoints from Section 9.5 and 9.6.
+
+Step 4:  Write the Paystack integration:
+         POST /api/resources/donate/ — calls Paystack initialize API:
+           url: https://api.paystack.co/transaction/initialize
+           headers: Authorization: Bearer {PAYSTACK_SECRET_KEY}
+           body: {email, amount (in kobo), reference, subaccount, transaction_charge}
+           transaction_charge is Siren's cut in kobo (e.g. 10% of amount)
+           subaccount is the recipient's Paystack sub-account code
+           Returns payment_url from Paystack response
+
+         POST /api/resources/donate/verify/ — Paystack webhook:
+           Validate X-Paystack-Signature header using HMAC SHA512
+           secret key is PAYSTACK_SECRET_KEY
+           On success: update Donation, update Incident donation totals
+           If RESPONDER fund: trigger responder payout split
+
+Step 5:  Add resource board WhatsApp summary to post_community_announcement task
+         and to the responder DONE reply (show resource and donation totals).
+
+Step 6:  Write apps/resources/admin.py from Section 14.
+
+Step 7:  TEST PHASE 4:
+         Create a verified incident
+         POST a resource suggestion to /api/resources/
+         POST a claim to /api/resources/{id}/claim/
+         Check resource appears with claim count
+         Initiate a test donation — check Paystack payment_url is returned
+         Use Paystack test mode — check webhook updates donation status
+         Check incident donation total updates
+
+================================================================================
+PHASE 5 — SUBSCRIPTIONS APP
+Goal: Person saves a location, gets WhatsApp alert when incident nearby.
+================================================================================
+
+Step 1:  Create apps/subscriptions/ with all files.
+         Write models.py from Section 7.5.
+         Run: python manage.py makemigrations subscriptions && python manage.py migrate
+
+Step 2:  Write apps/subscriptions/tasks.py
+         notify_location_subscribers(incident_id):
+           - Check incident has GPS
+           - Call haversine_query with broad 10km radius
+             table='subscriptions_locationsubscription'
+             extra_filters='AND is_active=TRUE'
+             limit=500
+           - For each result:
+               If distance > sub's alert_radius_km: skip
+               If incident_types filter set and doesn't match: skip
+               If SubscriptionAlert already exists for this sub+incident: skip
+               Build alert message from Section 11.7
+               send_whatsapp_text.delay(sub.whatsapp_number, message)
+               Create SubscriptionAlert record
+
+Step 3:  Wire notify_location_subscribers into _post_verification_actions.
+
+Step 4:  Add WATCH, MY ALERTS, STOP command handlers to whatsapp/handlers.py
+         Use a session/state store (Django cache or a simple DB model) to track
+         multi-step conversation state per phone number.
+
+Step 5:  Write serializers, views, urls for subscriptions. Add to sirenapp/urls.py.
+
+Step 6:  TEST PHASE 5:
+         Save a subscription at a specific lat/lng
+         Create a verified incident at the same lat/lng
+         Verify: subscriber receives WhatsApp alert
+         Send WATCH via WhatsApp — go through full guided flow
+         Verify: subscription saved after sharing location
+
+================================================================================
+PHASE 6 — REACT FRONTEND
+Goal: All public pages working. Dashboard working. WebSocket live updates.
+================================================================================
+
+Step 1:  Scaffold: npm create vite@latest frontend -- --template react-ts
+         Install all packages from Section 2.2.
+         Import leaflet CSS in main.tsx (see Section 13.4).
+
+Step 2:  Create frontend/src/types/index.ts
+         Define TypeScript interfaces for every model:
+         Incident, Responder, Organisation, ResourceItem, ResourceClaim,
+         Donation, LocationSubscription, ResponseLog, VouchRecord
+
+Step 3:  Create frontend/src/api/ with axios instances and all API calls.
+         Base URL from VITE_API_BASE_URL env variable.
+
+Step 4:  Create frontend/src/store/ with zustand stores:
+         authStore: JWT token, user info
+         incidentStore: active incidents for map
+
+Step 5:  Build all public pages from Section 13.3 in this order:
+         1. TrackPage — most important, test WebSocket live updates
+         2. MapPage — test live pins and popup
+         3. FeedPage — test filters and pagination
+         4. ReportPage — test form submission and redirect
+         5. HomePage — assemble all the above components
+         6. DonatePage + DonateSuccessPage — test Paystack redirect
+         7. WatchPage — test subscription web form
+         8. JoinPage and OrgsPage
+
+Step 6:  Build DashboardLayout with JWT auth guard.
+         Build all dashboard pages from Section 13.3.
+
+Step 7:  Set up WebSocket connection in MapPage and TrackPage:
+         Connect to ws://[API_BASE]/ws/incidents/
+         On incident.update message: update local state
+         Map pins re-render automatically
+         TrackPage status badge updates automatically
+
+Step 8:  TEST PHASE 6:
+         Submit web report via /report
+         Opens /track/:id — status shows DETECTED then updates to VERIFIED
+         Map at /map shows the incident pin appear
+         Resource board visible on TrackPage
+         Add a resource — appears on board immediately
+         Claim it — claim count updates
+         Initiate a donation — Paystack page opens
+         Complete test donation — success page shows updated total
+         Return to TrackPage — donation total updated
+
+================================================================================
+PHASE 7 — HARDENING AND DEPLOYMENT
+Goal: Production-ready. Live on Railway. Twilio connected to production URL.
+================================================================================
+
+Step 1:  Add rate limiting to all public endpoints (django-ratelimit).
+         Vouch: 1 per session per incident.
+         Report: 5 per IP per hour.
+         Donation initiate: 10 per IP per hour.
+
+Step 2:  VouchRecord anti-abuse:
+         Validate session_hash is unique per incident.
+         Flag is_suspicious=True if:
+           - distance_km > 100km from incident (far away)
+           - 10+ vouches from same IP in 60 seconds (velocity check)
+           - Vouch comes in within 30 seconds of incident creation (too fast)
+
+Step 3:  Write check_verifying_escalation periodic task (celery-beat):
+         Runs every 5 minutes.
+         Finds VERIFYING incidents older than 30 minutes with ai_confidence >= 0.4.
+         Flags ai_raw_response['needs_human_review'] = True.
+         Admin sees them highlighted in the dashboard.
+
+Step 4:  Write donation_pending_cleanup periodic task:
+         Runs daily.
+         Finds VICTIM donations where no recipient set after 48 hours.
+         Sends donor WhatsApp asking if they want to redirect.
+
+Step 5:  Set CELERY_ALWAYS_EAGER=False in production .env.
+
+Step 6:  Set DEBUG=False in production .env.
+         Add production Railway domain to ALLOWED_HOSTS.
+         Add production domain to CORS_ALLOWED_ORIGINS.
+
+Step 7:  Deploy Django to Railway:
+         Connect GitHub repo.
+         Add all environment variables from Section 5.
+         Add start command: daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application
+         Ensure python manage.py migrate runs on deploy.
+
+Step 8:  Point Twilio webhook URL to production Railway URL.
+
+Step 9:  Set up Paystack live keys in production .env.
+         Test live donation flow with real small amount.
+
+Step 10: Smoke test full production flow:
+         WhatsApp report → Claude verifies → responder notified
+         → responder accepts → subscription alert sent
+         → donor clicks link → donates on Paystack
+         → thank-you WhatsApp sent → incident resolved
+         → all parties receive closure message
+
+================================================================================
+SECTION 16 — CRITICAL NOTES FOR CLAUDE CODE
+================================================================================
+
+Read all of these before writing a single line of code.
+
+1.  NO GEODJANGO. EVER.
+    Every models.py uses: from django.db import models
+    NEVER: from django.contrib.gis.db import models
+    NEVER: PointField, PolygonField, GEOSGeometry, or any gis import.
+    All location data = two FloatFields: location_lat and location_lng.
+    All spatial queries go through utils/distance.py using Haversine SQL.
+
+2.  HAVERSINE USES HAVING NOT WHERE.
+    The distance_km column is computed in the SELECT clause.
+    The HAVING clause filters on it. Do not change HAVING to WHERE.
+    This is correct PostgreSQL SQL. Do not "fix" it.
+
+3.  TWILIO SIGNATURE VALIDATION IS MANDATORY.
+    Every request to /api/ingest/whatsapp/ must be validated with:
+    from twilio.request_validator import RequestValidator
+    validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+    valid = validator.validate(url, POST_data, signature_header)
+    Reject (return 403) if invalid.
+
+4.  WHATSAPP NUMBER FORMAT.
+    Twilio requires 'whatsapp:' prefix for all WhatsApp sends.
+    Always format numbers as: 'whatsapp:+2348012345678'
+    TWILIO_WHATSAPP_NUMBER in .env already has this prefix.
+    The from_number in Twilio webhooks also has this prefix — strip it
+    when storing: phone = from_number.replace('whatsapp:', '')
+
+5.  CLAUDE RESPONSE CLEANING.
+    Claude may wrap JSON in markdown code fences.
+    Always clean before parsing:
+    text = re.sub(r'```json|```', '', text).strip()
+    Then: result = json.loads(text)
+
+6.  PHONE PRIVACY.
+    Store SHA256(phone_number) as phone_hash for privacy.
+    Store the actual phone number in reporter_phone only where needed to
+    send messages. Import hashlib. Use:
+    hashlib.sha256(phone.encode()).hexdigest()
+
+7.  JWT IS ONLY FOR AGENCY/ADMIN DASHBOARD.
+    Public users (reporters, vouchers, donors, subscribers) never log in.
+    They are identified by phone hash or session token.
+    The no-account approach does not conflict with dashboard JWT auth.
+    These are two separate authentication tracks.
+
+8.  JWT STORAGE IN REACT.
+    Store JWT tokens in React useState or Context only.
+    NEVER localStorage or sessionStorage.
+    Dashboard users log in fresh each session.
+
+9.  LEAFLET CSS.
+    import 'leaflet/dist/leaflet.css' must be the first import in main.tsx.
+    Without it the map renders with no styles. This is not optional.
+
+10. CELERY IN DEVELOPMENT.
+    CELERY_ALWAYS_EAGER=True means tasks run synchronously in development.
+    No Redis needed to test the AI verification flow locally.
+    Set to False in production and ensure REDIS_URL is set.
+
+11. SUPABASE CONNECTION STRING.
+    Use the Direct Connection URI from Supabase Settings > Database.
+    DO NOT use the pooler or transaction pooler string.
+    The pooler does not support all query types used in this project.
+
+12. PAYSTACK WEBHOOK VALIDATION.
+    Validate the X-Paystack-Signature header on every donation webhook.
+    Use HMAC SHA512 with PAYSTACK_SECRET_KEY as the key.
+    Reject any request that fails validation.
+    import hmac, hashlib
+    signature = hmac.new(secret.encode(), body, hashlib.sha512).hexdigest()
+
+13. DONATION AMOUNTS IN KOBO.
+    Paystack uses kobo (100 kobo = 1 naira).
+    Store all amounts in kobo in the database.
+    Convert to naira only for display.
+    amount_kobo = int(amount_naira * 100)
+
+14. SUBSCRIPTION BROAD SWEEP.
+    notify_location_subscribers uses a 10km broad sweep first,
+    then filters by each subscription's own alert_radius_km.
+    The 10km is intentional — do not change it to the individual radius.
+    Individual radius filtering happens in the Python loop after the query.
+
+15. RESOURCECLAIM DUPLICATE PREVENTION.
+    unique_together = ('resource', 'claimer_hash') prevents one person
+    claiming the same item twice. Always catch IntegrityError on claim creation
+    and return a 200 (not 400) with message "You have already claimed this item".
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+Siren.ng BRD v4 Final — March 2026
+Python + Django + Supabase PostgreSQL + React + WhatsApp + Claude AI + Paystack
+================================================================================

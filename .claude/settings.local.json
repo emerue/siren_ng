@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(__NEW_LINE_aa6345627f4fabf2__:*)",
+      "Bash(__NEW_LINE_3d3faccf2c6f3da7__ cd:*)"
+    ]
+  }
+}

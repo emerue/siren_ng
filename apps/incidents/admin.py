@@ -5,9 +5,9 @@ from .models import Incident, ResponseLog, VouchRecord
 @admin.register(Incident)
 class IncidentAdmin(admin.ModelAdmin):
     list_display  = ['id', 'incident_type', 'severity', 'status', 'zone_name',
-                     'vouch_count', 'ai_confidence', 'fraud_score',
+                     'is_infrastructure', 'vouch_count', 'ai_confidence', 'fraud_score',
                      'total_donations_kobo', 'created_at']
-    list_filter   = ['status', 'incident_type', 'severity', 'source']
+    list_filter   = ['status', 'incident_type', 'severity', 'source', 'is_infrastructure']
     search_fields = ['description', 'address_text', 'zone_name']
     ordering      = ['-created_at']
     readonly_fields = ['id', 'reporter_hash', 'ai_raw_response', 'media_urls', 'created_at', 'updated_at']

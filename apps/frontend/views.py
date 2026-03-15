@@ -1,16 +1,16 @@
 from django.shortcuts import render
+from django.http import HttpResponse
+from pathlib import Path
+from django.conf import settings
 
-def home(request):
-    return render(request, 'frontend/home.html')
 
-def report(request):
-    return render(request, 'frontend/report.html')
-
-def track(request, incident_id):
-    return render(request, 'frontend/track.html', {'incident_id': str(incident_id)})
-
-def track_home(request):
-    return render(request, 'frontend/track_home.html')
-
-def feed(request):
-    return render(request, 'frontend/feed.html')
+def spa(request, *args, **kwargs):
+    """Serve the React SPA for all non-API routes."""
+    index = Path(settings.BASE_DIR) / 'frontend' / 'dist' / 'index.html'
+    if index.exists():
+        return HttpResponse(index.read_text(encoding='utf-8'))
+    # Fallback for dev (Vite running separately)
+    return HttpResponse(
+        '<p>Frontend not built. Run <code>npm run build</code> inside <code>frontend/</code>.</p>',
+        status=200,
+    )

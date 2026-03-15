@@ -2,7 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(__NEW_LINE_aa6345627f4fabf2__:*)",
-      "Bash(__NEW_LINE_3d3faccf2c6f3da7__ cd:*)"
+      "Bash(__NEW_LINE_3d3faccf2c6f3da7__ cd:*)",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(python:*)",
+      "Bash(rm:*)",
+      "Bash(python3:*)",
+      "Bash(.venv/Scripts/pip.exe install:*)",
+      "Bash(.venv/Scripts/pip.exe show:*)",
+      "Bash(DJANGO_SETTINGS_MODULE=sirenapp.settings .venv/Scripts/python.exe:*)"
     ]
   }
 }

@@ -45,3 +45,39 @@ def haversine_query(table, lat_field, lng_field, incident_lat, incident_lng,
         cursor.execute(sql, params)
         columns = [col[0] for col in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def point_to_line_distance(point_lat, point_lng, a_lat, a_lng, b_lat, b_lng):
+    """
+    Returns approximate distance in km from a point to the line segment A-B.
+    Used by Commute Shield to check if an incident is on a commuter's route.
+    This is a flat-earth approximation — accurate enough for Lagos corridor checks.
+    """
+    import math
+
+    def to_rad(d): return d * math.pi / 180
+    R = 6371.0
+
+    # Convert to approximate x/y in km
+    lat0 = (a_lat + b_lat) / 2
+    dx = math.cos(to_rad(lat0))
+
+    ax, ay = a_lng * dx, a_lat
+    bx, by = b_lng * dx, b_lat
+    px, py = point_lng * dx, point_lat
+
+    # Vector AB
+    abx, aby = bx - ax, by - ay
+    ab_len_sq = abx * abx + aby * aby
+
+    if ab_len_sq == 0:
+        # A and B are same point
+        return math.sqrt((px - ax) ** 2 + (py - ay) ** 2) * 111.0
+
+    # Project P onto AB
+    t = max(0, min(1, ((px - ax) * abx + (py - ay) * aby) / ab_len_sq))
+    closest_x = ax + t * abx
+    closest_y = ay + t * aby
+
+    dist_deg = math.sqrt((px - closest_x) ** 2 + (py - closest_y) ** 2)
+    return dist_deg * 111.0  # degrees to km (rough)

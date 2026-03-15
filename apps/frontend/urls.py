@@ -1,10 +1,7 @@
-from django.urls import path
+from django.urls import re_path
 from . import views
 
+# Catch-all: any path not matched by API/admin routes serves the React SPA
 urlpatterns = [
-    path('', views.home, name='home'),
-    path('report/', views.report, name='report'),
-    path('track/', views.track_home, name='track-home'),
-    path('track/<uuid:incident_id>/', views.track, name='track'),
-    path('feed/', views.feed, name='feed'),
+    re_path(r'^.*$', views.spa, name='spa'),
 ]

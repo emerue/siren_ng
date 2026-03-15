@@ -1,155 +1,417 @@
 ================================================================================
-SIREN.NG — DEVELOPER DOCUMENTATION & ONBOARDING GUIDE
+SIREN.NG — DEVELOPER DOCUMENTATION
+Version 2.0  |  March 2026  |  All Phases 1–6 Complete
 ================================================================================
 
-Welcome to the Siren.ng project! This document provides a complete technical 
-overview of the architecture, stack, integrations, and processes so a new 
-developer can easily understand how the system works and start making changes.
+────────────────────────────────────────────────────────────────────────────────
+1. OVERVIEW
+────────────────────────────────────────────────────────────────────────────────
+Siren.ng is a real-time community emergency coordination platform for Lagos,
+Nigeria. Citizens report emergencies via WhatsApp or the web app. The platform
+verifies incidents with AI, dispatches nearby volunteer responders and registered
+organisations, broadcasts community alerts to location subscribers, coordinates
+resource needs, and accepts micro-donations — all without requiring app installs
+or user accounts.
 
-================================================================================
-1. OVERVIEW & CORE PHILOSOPHY
-================================================================================
-Siren.ng is a community emergency coordination platform for Lagos. 
-The core philosophy is ZERO friction for the reporter:
-1. A user sends a WhatsApp message to the Siren number.
-2. Anthropic's Claude AI immediately verifies and categorizes the emergency.
-3. Nearest community responders and organizations are notified.
-4. The reporter gets a live tracking link to a web dashboard.
-5. The web platform handles live resource sharing and Paystack donations.
+────────────────────────────────────────────────────────────────────────────────
+2. TECH STACK
+────────────────────────────────────────────────────────────────────────────────
+Backend
+  • Django 5.1 (Python 3.13) + Django REST Framework
+  • Django Channels 4 (ASGI WebSocket, channels_redis)
+  • Celery (async tasks, Redis broker)
+  • PostgreSQL via Supabase  (engine: django.db.backends.postgresql)
+  • Redis via Railway  (broker + channel layers + cache)
+  • Twilio — WhatsApp Business API
+  • Anthropic claude-sonnet-4-6 — AI incident verification
+  • Paystack — donations + sub-account splits
+  • Cloudinary — media upload/storage
+  • WhiteNoise — static file serving in production
 
-WhatsApp is the entry point. The Web Dashboard is the richer experience.
+Frontend
+  • React 19 + Vite 6 + TypeScript
+  • react-leaflet@4 + Leaflet  (OpenStreetMap, no API key)
+  • Zustand  (global state: auth + incidents)
+  • TanStack React Query  (data fetching + cache)
+  • Recharts  (analytics charts)
+  • Tailwind CSS 3.4
 
-================================================================================
-2. TECHNOLOGY STACK
-================================================================================
-## Backend
-* Framework: Django 5.1 + Django REST Framework (DRF)
-* Database: PostgreSQL (Hosted on Supabase). *Note: We use plain PostgreSQL, 
-  NOT GeoDjango, to avoid complex GDAL/OSGeo4W dependencies on Windows.*
-* Async Tasks: Celery + Redis
-* Real-time: Django Channels + WebSockets (Daphne as ASGI server)
-* Spatial Queries: Raw SQL Haversine queries (in `utils/distance.py`)
+Hosting (target)
+  • Railway — Django ASGI + Celery worker + Redis
+  • Supabase — PostgreSQL
+  • Cloudinary — media files
 
-## Frontend
-* Framework: React 19 + TypeScript + Vite
-* Styling: TailwindCSS 3.4
-* Maps: React-Leaflet + Leaflet + OpenStreetMap (Free, no API keys)
-* State Management: Zustand + React Query
+PERMANENT CONSTRAINTS (never change these):
+  ✗ NO GeoDjango, NO PointField, NO GDAL, NO postgis engine
+  ✓ Location = two FloatFields: location_lat + location_lng
+  ✓ Haversine distance via raw SQL in utils/distance.py
 
-## External Integrations
-* AI/Verification: Anthropic Claude (claude-sonnet-4-6)
-* Messaging: Twilio WhatsApp Business API
-* Payments/Donations: Paystack (using Sub-accounts for split payments)
-* Media Storage: Cloudinary (Images/Video)
-
-================================================================================
-3. SYSTEM ARCHITECTURE & DATA FLOW
-================================================================================
-1. Ingestion: 
-   * A user messages the Twilio WhatsApp number.
-   * Twilio sends a webhook POST request to `/api/ingest/whatsapp/`.
-   * The backend validates the Twilio signature and responds 200 immediately.
-
-2. AI Verification (Celery Task):
-   * `verify_incident_ai` task sends the report text to Anthropic Claude.
-   * Claude returns JSON identifying if it's a valid emergency, the severity, 
-     and incident type (FIRE, FLOOD, RTA, etc.).
-   * If `ai_confidence >= 0.75`, status gets updated to `VERIFIED`.
-
-3. Broadcasting & Dispatch:
-   * A raw Haversine SQL query (`utils/distance.py`) finds the nearest 
-     `VERIFIED` responders and clinics.
-   * Celery tasks send out Twilio WhatsApp alerts to those responders.
-   * The `incidents.consumers` Django Channel broadcasts the new incident via 
-     WebSocket to all active React frontends, plotting the pin on the live map.
-
-4. Resource Board & Donations:
-   * Users open the web link to see the live resource board.
-   * Donations use Paystack split payments. Money is split at the transaction 
-     level: a percentage goes to the platform, rest goes to Victim's/Responder's 
-     Paystack Sub-account.
-
-================================================================================
-4. PROJECT STRUCTURE
-================================================================================
+────────────────────────────────────────────────────────────────────────────────
+3. PROJECT STRUCTURE
+────────────────────────────────────────────────────────────────────────────────
 siren_ng/
-├── sirenapp/                 # Main Django config (settings.py, urls.py, celery.py, asgi.py)
-├── apps/                     # Django Apps directory
-│   ├── incidents/            # Core incident logic, models, WebSocket consumers, Claude tasks
-│   ├── whatsapp/             # Twilio webhooks, incoming message routing, outgoing templates
-│   ├── responders/           # Individual volunteer responders profiles & dispatch logic
-│   ├── organisations/        # Clinics, Agencies, NGOs profiles & logic
-│   ├── resources/            # Resource board claims & Paystack donation processing
-│   ├── subscriptions/        # Users watching specific coordinates for alerts
-│   ├── analytics/            # Dashboard stats and aggregating API views
-│   └── frontend/             # Optional Django app used to serve the Vite build
-├── utils/                    
-│   └── distance.py           # The raw Haversine SQL logic. All spatial queries go here.
-├── frontend/                 # React + Vite application
+├── sirenapp/               Django project package
+│   ├── settings.py
+│   ├── urls.py             Root URL conf (API routes + SPA catch-all last)
+│   ├── asgi.py             ASGI + WebSocket routing (Django Channels)
+│   ├── celery.py
+│   └── wsgi.py
+├── apps/
+│   ├── incidents/          Core: Incident model, AI verify task, WS consumer
+│   ├── whatsapp/           Twilio webhook, inbound routing, outbound tasks
+│   ├── responders/         Volunteer Responder model + dispatch task
+│   ├── organisations/      Organisation model + proximity notification task
+│   ├── resources/          ResourceItem, Donation, Paystack integration
+│   ├── subscriptions/      LocationSubscription, WhatsApp alert task
+│   ├── analytics/          Dashboard analytics API endpoints
+│   └── frontend/           React SPA catch-all (serves frontend/dist/index.html)
+├── utils/
+│   └── distance.py         Haversine raw SQL utility (HAVING, not WHERE)
+├── frontend/               React application (Vite)
 │   ├── src/
-│   │   ├── api/              # Axios configurations & API calls
-│   │   ├── components/       # Shared UI components
-│   │   ├── pages/            # Page routing components
-│   │   └── store/            # Zustand stores
-├── .env                      # Environment variables
-└── manage.py                 
+│   │   ├── api/index.ts    All Axios API calls + JWT interceptor
+│   │   ├── store/          Zustand: authStore.ts, incidentStore.ts
+│   │   ├── hooks/          useWebSocket.ts
+│   │   ├── utils/          hash.ts  (Web Crypto SHA-256, no server round-trip)
+│   │   ├── types/index.ts  All TypeScript interfaces
+│   │   ├── components/     DashboardLayout.tsx
+│   │   └── pages/          All page components (see Section 12)
+│   ├── tailwind.config.js  Design tokens (primary #C0392B, etc.)
+│   ├── .env                VITE_API_BASE_URL, VITE_WHATSAPP_NUMBER
+│   └── dist/               Built output (served by WhiteNoise + SPA catch-all)
+├── requirements.txt
+├── Procfile                web + worker dyno declarations
+├── runtime.txt             Python version pin
+└── .env                    Backend secrets (never commit)
 
-================================================================================
-5. LOCAL DEVELOPMENT GUIDE
-================================================================================
+────────────────────────────────────────────────────────────────────────────────
+4. ENVIRONMENT VARIABLES
+────────────────────────────────────────────────────────────────────────────────
+Backend root .env:
+  SECRET_KEY=
+  DEBUG=True
+  ALLOWED_HOSTS=localhost,127.0.0.1
+  DATABASE_URL=postgresql://...      # Supabase DIRECT connection (not port 6543)
+  REDIS_URL=redis://...              # Railway Redis
+  CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+  SITE_URL=http://localhost:8000     # Used in WhatsApp message links
 
-## Prerequisites
-* Python 3.13+
-* Node.js 20+
+  ANTHROPIC_API_KEY=
+  ANTHROPIC_MODEL=claude-sonnet-4-6
 
-## 1. Backend Setup
-1. Activate Virtual Environment:
-   `.\.venv\Scripts\Activate.ps1` (Windows)
-2. Install requirements:
-   `pip install -r requirements.txt`
-3. Environment variables:
-   Ensure your `.env` contains `DATABASE_URL` (Supabase Direct IPv4 string), 
-   `REDIS_URL`, `ANTHROPIC_API_KEY`, `TWILIO_*`, `PAYSTACK_*`.
-   Set `CELERY_ALWAYS_EAGER=True` in local dev so tasks run synchronously!
-4. Run migrations:
-   `python manage.py migrate`
-5. Start Django:
-   `python manage.py runserver`
+  TWILIO_ACCOUNT_SID=
+  TWILIO_AUTH_TOKEN=
+  TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
 
-## 2. Frontend Setup
-1. Navigate to frontend:
-   `cd frontend`
-2. Install dependencies:
-   `npm install`
-3. Start Vite dev server:
-   `npm run dev`
+  PAYSTACK_SECRET_KEY=
+  PAYSTACK_PUBLIC_KEY=
+  SIREN_PAYSTACK_SUBACCOUNT=         # Platform's own Paystack sub-account code
 
-================================================================================
-6. HOW TO MAKE CHANGES (Best Practices)
-================================================================================
+  CLOUDINARY_CLOUD_NAME=
+  CLOUDINARY_API_KEY=
+  CLOUDINARY_API_SECRET=
 
-Adding a new Model:
-1. NEVER use `django.contrib.gis`. Always use plain `models.Model`.
-2. For location, simply add `location_lat = models.FloatField()` and 
-   `location_lng = models.FloatField()`.
-3. Run `python manage.py makemigrations <app_name>` -> `python manage.py migrate`.
+  CELERY_ALWAYS_EAGER=True           # Set False in production
 
-Creating a new API endpoint:
-1. Write the view in `apps/<your_app>/views.py` using DRF (APIView or ViewSet).
-2. Wire it in `apps/<your_app>/urls.py`.
-3. If it modifies an incident, trigger `_transition()` in `incidents/tasks.py` 
-   so the WebSocket fires and the frontend updates instantly.
+Frontend frontend/.env:
+  VITE_API_BASE_URL=http://localhost:8000
+  VITE_WHATSAPP_NUMBER=+2349000000000
 
-Adding a new Frontend Component:
-1. Create the component inside `frontend/src/components/`.
-2. Use TailwindCSS for all styling (no custom CSS sheets unless absolutely needed).
-3. If it requires data, add the Axios call to `frontend/src/api/` and manage 
-   the state via Zustand or React Query.
+────────────────────────────────────────────────────────────────────────────────
+5. RUNNING LOCALLY
+────────────────────────────────────────────────────────────────────────────────
+Prerequisites: Python 3.13 venv activated, Node 20+, Redis accessible.
 
-Testing Twilio Webhooks locally:
-Because Twilio needs a public URL to hit your local server, run `ngrok http 8000`.
-Copy the generated Forwarding URL and paste it into the Twilio Sandbox Webhook 
-URL field + `/api/ingest/whatsapp/`.
+  # Django API server
+  .venv/Scripts/python.exe manage.py migrate
+  .venv/Scripts/python.exe manage.py createsuperuser
+  .venv/Scripts/python.exe manage.py runserver
+
+  # Celery worker (separate terminal)
+  .venv/Scripts/celery -A sirenapp worker -l info
+
+  # Frontend dev server (separate terminal, hot-reload)
+  cd frontend
+  npm install --legacy-peer-deps
+  npm run dev                         # Vite on http://localhost:5173
+
+  # Production build (then Django serves via WhiteNoise)
+  cd frontend && npm run build        # outputs to frontend/dist/
+  .venv/Scripts/python.exe manage.py collectstatic
+
+Note: Always use .venv/Scripts/python.exe — not bare `python` or `python3`.
+
+────────────────────────────────────────────────────────────────────────────────
+6. CORE DATA MODELS
+────────────────────────────────────────────────────────────────────────────────
+Incident  (apps/incidents/models.py)
+  id                   UUID PK
+  source               WHATSAPP | WEB
+  incident_type        FIRE|FLOOD|COLLAPSE|RTA|EXPLOSION|DROWNING|HAZARD|OTHER
+  severity             LOW | MEDIUM | HIGH | CRITICAL
+  status               REPORTED→VERIFYING→VERIFIED|REJECTED→RESPONDING→RESOLVED
+  location_lat/lng     FloatField nullable
+  address_text         Text
+  zone_name            Text  (reverse-geocoded area name)
+  media_urls           JSONField  (Cloudinary URLs list)
+  reporter_phone_hash  SHA-256 of reporter phone (anonymous)
+  ai_confidence        Float 0–1
+  fraud_score          Float 0–1
+  ai_raw_response      JSONField
+  vouch_count          Int
+  vouch_threshold      Int
+  total_donations_kobo BigInt
+  donation_count       Int
+  created_at / updated_at / resolved_at
+
+ResponseLog  (apps/incidents/models.py)
+  Immutable audit log of every status change with actor + note.
+
+VouchRecord  (apps/incidents/models.py)
+  One vouch per session_hash. Stores distance for fraud detection.
+
+Responder  (apps/responders/models.py)
+  phone_hash, skill_category, home_lat/lng, response_radius_km,
+  is_available, responds_to (JSONField), paystack_subaccount.
+
+ResponderDispatch  (apps/responders/models.py)
+  Through table Responder ↔ Incident.
+  Tracks: accepted (nullable bool), on_scene_at, completed_at.
+  unique_together = (responder, incident)
+
+Organisation  (apps/organisations/models.py)
+  NGO/hospital/fire station: location_lat/lng, org_type, status=VERIFIED,
+  responds_to (JSONField), contact_whatsapp, paystack_subaccount.
+
+ResourceItem  (apps/resources/models.py)
+  FK→Incident. category, label, status: NEEDED→CLAIMED→ARRIVED.
+
+ResourceClaim  (apps/resources/models.py)
+  FK→ResourceItem. unique_together (resource, claimer_hash).
+  Duplicate claim returns HTTP 200 (not 400) per spec.
+
+Donation  (apps/resources/models.py)
+  FK→Incident. amount_kobo, fund_choice (VICTIM|RESPONDER|PLATFORM),
+  paystack_reference (unique), status (PENDING|SUCCESS|FAILED).
+  property amount_naira = amount_kobo / 100
+
+LocationSubscription  (apps/subscriptions/models.py)
+  phone_hash, whatsapp_number, location_lat/lng, alert_radius_km,
+  incident_types (JSONField), is_active.
+
+SubscriptionAlert  (apps/subscriptions/models.py)
+  Dedup: unique_together (subscription, incident).
+
+────────────────────────────────────────────────────────────────────────────────
+7. API ENDPOINTS
+────────────────────────────────────────────────────────────────────────────────
+Auth
+  POST  /api/auth/token/               Obtain JWT pair
+  POST  /api/auth/token/refresh/       Refresh access token
+
+Incident Ingest
+  POST  /api/ingest/web/               Web form submission (multipart/form-data)
+  POST  /api/ingest/whatsapp/          Twilio webhook (signature-validated)
+
+Incidents
+  GET   /api/incidents/                Active incidents list (public)
+  GET   /api/incidents/<id>/           Detail + response_logs
+  POST  /api/incidents/<id>/vouch/
+  POST  /api/incidents/<id>/verify/    (staff)
+  POST  /api/incidents/<id>/reject/    (staff)
+  POST  /api/incidents/<id>/resolve/   (staff)
+  POST  /api/incidents/<id>/dispatch/  (staff — triggers Celery dispatch chain)
+
+Responders
+  POST  /api/responders/register/
+  POST  /api/responders/<id>/toggle-availability/
+  POST  /api/responders/dispatch/<dispatch_id>/accept/
+  POST  /api/responders/dispatch/<dispatch_id>/decline/
+  POST  /api/responders/dispatch/<dispatch_id>/onscene/
+  POST  /api/responders/dispatch/<dispatch_id>/complete/
+
+Organisations
+  POST  /api/organisations/register/
+  GET   /api/organisations/map/        All verified orgs with coordinates
+  GET   /api/organisations/<id>/
+  POST  /api/organisations/<id>/respond/
+
+Resources
+  GET   /api/resources/<incident_id>/items/
+  POST  /api/resources/<incident_id>/items/
+  POST  /api/resources/items/<item_id>/claim/
+  POST  /api/resources/items/<item_id>/confirm/
+
+Donations
+  POST  /api/resources/<incident_id>/donate/initiate/
+  POST  /api/resources/donate/verify/              Paystack webhook (csrf_exempt)
+  GET   /api/resources/<incident_id>/donate/summary/
+
+Subscriptions
+  GET   /api/subscriptions/?phone_hash=<hash>
+  POST  /api/subscriptions/
+  PATCH /api/subscriptions/<id>/
+  DELETE /api/subscriptions/<id>/
+
+Analytics  (JWT required)
+  GET   /api/analytics/summary/
+  GET   /api/analytics/zones/
+  GET   /api/analytics/trends/?range=30d
+  GET   /api/analytics/donations/?range=30d
+  GET   /api/analytics/subscribers/?range=30d
+
+────────────────────────────────────────────────────────────────────────────────
+8. WEBSOCKET
+────────────────────────────────────────────────────────────────────────────────
+URL:    ws://<host>/ws/incidents/
+Group:  "incidents"  (broadcast to all connected clients)
+
+Server → client message:
+  { "type": "incident.update", "incident": { ...serialized Incident } }
+
+Triggered on: new incident, status change, vouch added.
+Frontend hook: useWebSocket.ts — auto-reconnects after 3s on close.
+Store: incidentStore.updateIncident() merges update by id.
+
+────────────────────────────────────────────────────────────────────────────────
+9. WHATSAPP FLOWS  (apps/whatsapp/)
+────────────────────────────────────────────────────────────────────────────────
+Inbound routing (handlers.py → route_inbound):
+
+  Keyword / context          → Action
+  ──────────────────────────────────────────────────────────────────
+  YES / NO                   → Responder accepts/declines dispatch
+  ONSCENE / DONE             → Responder marks on-scene / completed
+  ACCEPT / DECLINE / CALL    → Organisation replies to notification
+  JOIN RESPONDERS            → Responder onboarding (DB registration)
+  JOIN ORG                   → Organisation registration prompt
+  WATCH                      → Start location subscription flow
+  MY ALERTS                  → List user's active subscriptions
+  STOP <label>               → Deactivate named subscription
+  VOUCH <id>                 → Vouch for incident
+  Location share             → Processed in active flow context
+  Anything else              → Create new incident report
+
+Multi-step WATCH flow state uses Django cache (600s TTL), key: f'onboarding:{phone}'.
+All outbound message strings are in templates.py as pure Python functions.
+
+────────────────────────────────────────────────────────────────────────────────
+10. AI VERIFICATION CHAIN  (apps/incidents/tasks.py)
+────────────────────────────────────────────────────────────────────────────────
+Task: verify_incident_with_ai(incident_id)
+  1. Fetches incident + media URLs
+  2. Calls Anthropic claude-sonnet-4-6 with structured prompt
+  3. Parses JSON response: { severity, fraud_score, confidence, recommendation }
+  4. Updates incident.severity, ai_confidence, fraud_score, ai_raw_response
+  5a. fraud_score > 0.7  → auto-reject + WhatsApp notify reporter
+  5b. otherwise          → set VERIFIED + notify reporter + trigger dispatch
+
+Celery dispatch chain (all async tasks):
+  verify_incident_with_ai
+    → notify_nearest_responders   (10km radius, 5 closest VERIFIED+available)
+    → notify_nearest_organisations (10km radius, 5 closest VERIFIED)
+    → notify_location_subscribers  (broad 10km sweep, per-sub radius filter)
+
+Re-dispatch: notify_nearest_responders(incident_id, exclude_ids=[...]) — declined
+  responders are passed in exclude_ids and skipped in the Haversine query.
+
+────────────────────────────────────────────────────────────────────────────────
+11. DONATIONS  (apps/resources/)
+────────────────────────────────────────────────────────────────────────────────
+Flow:
+  1. POST /donate/initiate/
+       Body: { fund_choice, donor_name, donor_email, amount_naira }
+       → Paystack Initialize API
+       → 10% transaction_charge split to SIREN_PAYSTACK_SUBACCOUNT
+       → Returns { authorization_url } — frontend redirects user here
+
+  2. User completes payment on Paystack hosted page
+       → Paystack redirects to SITE_URL/donate/success?reference=...
+
+  3. POST /donate/verify/  (Paystack sends this automatically)
+       → Validate X-Paystack-Signature (HMAC SHA-512)
+       → Idempotent: skip if Donation.status == SUCCESS already
+       → Set status=SUCCESS, update incident totals, send thank-you WhatsApp
+
+Fund choices: VICTIM | RESPONDER | PLATFORM
+
+────────────────────────────────────────────────────────────────────────────────
+12. FRONTEND PAGES
+────────────────────────────────────────────────────────────────────────────────
+Public routes:
+  /                  HomePage           Live incident feed preview + hero CTA
+  /map               MapPage            Full-screen Leaflet map; incident CircleMarkers
+                                        (size/color by severity) + org Markers; type filter
+  /feed              FeedPage           Paginated incident list with type/severity filters
+  /track/:id         TrackPage          Live detail: resource board (suggest/claim modals),
+                                        donation fund cards, response log timeline, mini-map
+  /report            ReportPage         4-step form: type→location (Leaflet pin+geoloc)→
+                                        description→media
+  /join              JoinPage           Responder + Organisation signup links
+  /watch             WatchPage          Location subscription management (mirrors WATCH flow)
+  /donate/:id        DonatePage         Fund selection + amount → Paystack redirect
+  /donate/success    DonateSuccessPage  Post-payment confirmation page
+  /orgs              OrgsPage           Directory of verified organisations
+  /login             LoginPage          Staff JWT login
+
+Protected dashboard (/dashboard/*):
+  /dashboard/              DashboardHome          Stat cards + active incidents table
+  /dashboard/incident/:id  DashboardIncidentDetail AI result, Leaflet map, resources, donations
+  /dashboard/analytics     DashboardAnalytics      Recharts bar/line, date range controls
+  /dashboard/responders    DashboardResponders     Responder table (verify/suspend)
+  /dashboard/orgs          DashboardOrgs           Organisation table
+  /dashboard/subscribers   DashboardSubscribers    Subscription stats cards
+  /dashboard/donations     DashboardDonations      Donation totals by fund + date range
+
+────────────────────────────────────────────────────────────────────────────────
+13. STATIC FILES & SPA SERVING
+────────────────────────────────────────────────────────────────────────────────
+Development:
+  Django :8000 + Vite :5173 run separately.
+  CORS allows localhost:5173.
+
+Production:
+  1. cd frontend && npm run build   → frontend/dist/
+  2. python manage.py collectstatic → staticfiles/ (WhiteNoise takes over)
+  3. All non-API routes → apps/frontend/views.spa()
+       Reads frontend/dist/index.html → React Router handles client-side routing.
+  4. STATICFILES_DIRS = [BASE_DIR / 'frontend' / 'dist'] ensures assets are collected.
+
+────────────────────────────────────────────────────────────────────────────────
+14. HAVERSINE UTILITY  (utils/distance.py)
+────────────────────────────────────────────────────────────────────────────────
+haversine_query(center_lat, center_lng, table, extra_filters='', radius_km=10.0, limit=5)
+
+Executes raw SQL using the spherical law of cosines formula.
+Uses HAVING (not WHERE) because the distance expression is an aggregate alias —
+using WHERE on it raises a SQL column reference error in PostgreSQL.
+
+────────────────────────────────────────────────────────────────────────────────
+15. DEPLOYMENT (Railway)
+────────────────────────────────────────────────────────────────────────────────
+Procfile:
+  web:    gunicorn sirenapp.asgi:application -k uvicorn.workers.UvicornWorker
+  worker: celery -A sirenapp worker -l info
+
+runtime.txt:  python-3.13.x
+
+Production env vars to set in Railway dashboard:
+  DEBUG=False
+  CELERY_ALWAYS_EAGER=False
+  SITE_URL=https://<your-domain>.up.railway.app
+  ALLOWED_HOSTS=<your-domain>.up.railway.app
+  CORS_ALLOWED_ORIGINS=https://<your-domain>.up.railway.app
+
+DATABASE_URL: use Supabase DIRECT connection URI (not pooler, not port 6543).
+
+Post-deploy commands:
+  python manage.py migrate
+  python manage.py createsuperuser
+  python manage.py collectstatic --noinput
+
+Security settings auto-applied when DEBUG=False (settings.py):
+  SECURE_SSL_REDIRECT, SESSION_COOKIE_SECURE, CSRF_COOKIE_SECURE,
+  SECURE_HSTS_SECONDS=31536000, SECURE_HSTS_INCLUDE_SUBDOMAINS=True
 
 ================================================================================
 END OF DOCUMENTATION

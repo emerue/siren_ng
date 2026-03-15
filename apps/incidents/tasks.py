@@ -15,6 +15,7 @@ def verify_incident_ai(self, incident_id: str):
 
     incident = Incident.objects.get(id=incident_id)
 
+    # v5: Extended prompt to detect infrastructure hazards
     prompt = f"""You are an emergency verification system for Lagos, Nigeria.
 Analyse this report and respond ONLY with valid JSON. No markdown. No explanation.
 
@@ -29,12 +30,15 @@ Return this exact JSON:
   "severity": "LOW|MEDIUM|HIGH|CRITICAL",
   "ai_confidence": 0.0 to 1.0,
   "fraud_score": 0.0 to 1.0,
+  "is_infrastructure": true or false,
   "suggested_skills": ["list of skill codes"],
   "reasoning": "one sentence"
 }}
 
 Only these types qualify: FIRE FLOOD COLLAPSE RTA EXPLOSION DROWNING HAZARD
-fraud_score above 0.7 means the report looks fake."""
+fraud_score above 0.7 means the report looks fake.
+is_infrastructure must be true if the report mentions transformer, wire, pole,
+power line, NEPA, EKEDC, fallen cable, or electrical infrastructure of any kind."""
 
     try:
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -49,9 +53,10 @@ fraud_score above 0.7 means the report looks fake."""
     except Exception as exc:
         raise self.retry(exc=exc)
 
-    incident.ai_raw_response = result
-    incident.ai_confidence   = result.get('ai_confidence', 0.0)
-    incident.fraud_score     = result.get('fraud_score', 0.0)
+    incident.ai_raw_response   = result
+    incident.ai_confidence     = result.get('ai_confidence', 0.0)
+    incident.fraud_score       = result.get('fraud_score', 0.0)
+    incident.is_infrastructure = result.get('is_infrastructure', False)
 
     if not result.get('eligible') or incident.fraud_score > 0.7:
         _transition(incident, 'REJECTED', 'AI', result.get('rejection_reason', ''))
@@ -88,7 +93,7 @@ def _transition(incident, new_status, actor, note=''):
     try:
         broadcast_update(incident)  # Push to all WebSocket clients
     except Exception:
-        pass  # Redis/channel layer unavailable — do not block status save
+        pass  # Redis/channel layer unavailable -- do not block status save
 
 
 def _post_verification_actions(incident):
@@ -118,6 +123,14 @@ def _post_verification_actions(incident):
     except Exception:
         pass
 
+    # v5: Commute Shield -- runs for all road/infrastructure/flood incidents
+    try:
+        if incident.is_infrastructure or incident.incident_type in ['HAZARD', 'RTA', 'FLOOD']:
+            from apps.subscriptions.tasks import notify_commute_shield
+            notify_commute_shield.delay(str(incident.id))
+    except Exception:
+        pass
+
 
 def _notify_rejected(incident, reason):
     try:
@@ -133,3 +146,26 @@ def _notify_verifying(incident):
         notify_reporter_verifying.delay(str(incident.id))
     except Exception:
         pass
+
+
+@shared_task
+def check_verifying_escalation():
+    """
+    Runs every 5 minutes. Escalates VERIFYING incidents that have enough vouches
+    or that have been waiting too long.
+    """
+    from apps.incidents.models import Incident
+    from django.utils import timezone
+    from datetime import timedelta
+
+    cutoff = timezone.now() - timedelta(hours=2)
+
+    for incident in Incident.objects.filter(status='VERIFYING'):
+        if incident.vouch_count >= incident.vouch_threshold:
+            _transition(incident, 'VERIFIED', 'community',
+                        f'Escalated: {incident.vouch_count} vouches reached threshold')
+            incident.save()
+            _post_verification_actions(incident)
+        elif incident.created_at < cutoff:
+            _transition(incident, 'REJECTED', 'AI', 'Insufficient vouches after 2 hours')
+            incident.save()

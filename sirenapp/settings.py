@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.subscriptions",
     "apps.analytics",
     "apps.frontend",
+    "django_celery_beat",
 ]
 
 MIDDLEWARE = [
@@ -49,7 +50,7 @@ ROOT_URLCONF = "sirenapp.urls"
 ASGI_APPLICATION = "sirenapp.asgi.application"
 
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates",
-    "DIRS": [], "APP_DIRS": True, "OPTIONS": {"context_processors": [
+    "DIRS": [BASE_DIR / "frontend" / "dist"], "APP_DIRS": True, "OPTIONS": {"context_processors": [
         "django.template.context_processors.debug",
         "django.template.context_processors.request",
         "django.contrib.auth.context_processors.auth",
@@ -86,11 +87,26 @@ REST_FRAMEWORK = {
     ),
 }
 
-CORS_ALLOWED_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
+CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", default="http://localhost:5173,http://localhost:3000,http://localhost:8000,http://127.0.0.1:8000").split(",")
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Serve React build files (CSS/JS/assets) at root URL paths via WhiteNoise
+# WhiteNoise middleware intercepts /assets/... before URL routing hits the SPA catch-all
+_FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+if _FRONTEND_DIST.exists():
+    WHITENOISE_ROOT = _FRONTEND_DIST
+
+SITE_URL = config("SITE_URL", default="http://localhost:8000")
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 
 DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
 CLOUDINARY_STORAGE = {
@@ -115,3 +131,29 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Africa/Lagos"
 USE_I18N = True
 USE_TZ = True
+
+
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'daily-safety-score': {
+        'task': 'apps.subscriptions.tasks.daily_safety_score_update',
+        'schedule': crontab(hour=6, minute=0),
+    },
+    'morning-commute-briefing': {
+        'task': 'apps.subscriptions.tasks.send_commute_briefing',
+        'schedule': crontab(hour=6, minute=30),
+    },
+    'evening-commute-briefing': {
+        'task': 'apps.subscriptions.tasks.send_commute_briefing',
+        'schedule': crontab(hour=16, minute=30),
+    },
+    'verifying-escalation': {
+        'task': 'apps.incidents.tasks.check_verifying_escalation',
+        'schedule': crontab(minute='*/5'),
+    },
+    'donation-cleanup': {
+        'task': 'apps.resources.tasks.donation_pending_cleanup',
+        'schedule': crontab(hour=9, minute=0),
+    },
+}

@@ -67,6 +67,9 @@ class Incident(models.Model):
     total_donations_kobo = models.PositiveIntegerField(default=0)  # Stored in kobo
     donation_count       = models.PositiveIntegerField(default=0)
 
+    # v5 NEW: set True by Claude when HAZARD incident involves wires/poles/transformers
+    is_infrastructure = models.BooleanField(default=False)
+
     # Assigned agency
     agency_assigned = models.ForeignKey(
         'organisations.Organisation', null=True, blank=True,

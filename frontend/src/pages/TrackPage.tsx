@@ -146,11 +146,6 @@ export default function TrackPage() {
           <div className="mt-3 flex items-center justify-center gap-2">
             <SeverityBadge severity={incident.severity} />
             <span className="text-textBody text-sm">{incident.incident_type}</span>
-            {incident.is_infrastructure && (
-              <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded uppercase">
-                Infrastructure Hazard
-              </span>
-            )}
           </div>
           <p className="text-textMuted text-sm mt-2">{incident.zone_name || incident.address_text}</p>
           <p className="text-textMuted text-xs mt-1">

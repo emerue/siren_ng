@@ -18,4 +18,5 @@ django-cloudinary-storage
 django-celery-beat==2.7
 requests
 gunicorn==22.0.0
+setuptools
 pytz

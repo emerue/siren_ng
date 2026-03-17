@@ -2,7 +2,7 @@
 providers = ["python"]
 
 [phases.setup]
-nixPkgs = ["python313", "python313Packages.pip", "nodejs_20"]
+nixPkgs = ["python313", "python313Packages.pip", "nodejs_20", "postgresql"]
 
 [phases.install]
 cmds = [

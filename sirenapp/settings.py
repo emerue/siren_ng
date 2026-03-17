@@ -105,7 +105,7 @@ CORS_ALLOWED_ORIGINS = config(
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedStaticFilesStorage"
 
 _FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 if _FRONTEND_DIST.exists():

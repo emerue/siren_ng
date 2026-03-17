@@ -8,12 +8,12 @@ nixPkgs = ["python313", "python313Packages.pip", "nodejs_20"]
 cmds = [
     "python3 -m pip install --upgrade pip",
     "python3 -m pip install -r requirements.txt",
-    "cd frontend && npm ci"
+    "cd frontend && npm install"
 ]
 
 [phases.build]
 cmds = [
-    "cd frontend && npm run build || true",
+    "cd frontend && npm run build",
     "mkdir -p staticfiles",
     "python3 manage.py collectstatic --noinput",
     "python3 manage.py migrate --noinput"

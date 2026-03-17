@@ -2,21 +2,17 @@
 FROM node:20-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Python app ──
 FROM python:3.13-slim
 
-# Install system deps for psycopg (libpq)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev gcc \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # Install Python dependencies
+# psycopg[binary] bundles its own libpq — no system libpq-dev needed
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -26,7 +22,7 @@ COPY . .
 # Copy built frontend from stage 1
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
-# Create staticfiles dir placeholder
+# Create staticfiles dir so WhiteNoise doesn't error before collectstatic runs
 RUN mkdir -p staticfiles
 
 # Make startup script executable

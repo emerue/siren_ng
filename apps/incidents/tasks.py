@@ -2,13 +2,42 @@ import json
 import re
 from celery import shared_task
 from django.conf import settings
-import anthropic
+
+
+def _call_ai(prompt: str) -> dict:
+    """
+    Calls the configured AI provider (groq or anthropic) and returns parsed JSON.
+    Switch providers by setting AI_PROVIDER in .env.
+    """
+    provider = getattr(settings, 'AI_PROVIDER', 'anthropic')
+
+    if provider == 'groq':
+        from groq import Groq
+        client = Groq(api_key=settings.GROQ_API_KEY)
+        completion = client.chat.completions.create(
+            model=settings.GROQ_MODEL,
+            messages=[{'role': 'user', 'content': prompt}],
+            max_tokens=1024,
+        )
+        text = completion.choices[0].message.content.strip()
+    else:
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model=settings.ANTHROPIC_MODEL,
+            max_tokens=1024,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        text = message.content[0].text.strip()
+
+    text = re.sub(r'```json|```', '', text).strip()
+    return json.loads(text)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=10)
 def verify_incident_ai(self, incident_id: str):
     """
-    Calls Claude to classify and verify an incident.
+    Calls AI to classify and verify an incident.
     Updates status. Triggers all downstream notifications if VERIFIED.
     """
     from apps.incidents.models import Incident
@@ -41,15 +70,7 @@ is_infrastructure must be true if the report mentions transformer, wire, pole,
 power line, NEPA, EKEDC, fallen cable, or electrical infrastructure of any kind."""
 
     try:
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        message = client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=1024,
-            messages=[{'role': 'user', 'content': prompt}]
-        )
-        text = message.content[0].text.strip()
-        text = re.sub(r'```json|```', '', text).strip()  # Strip code fences
-        result = json.loads(text)
+        result = _call_ai(prompt)
     except Exception as exc:
         raise self.retry(exc=exc)
 

@@ -2,6 +2,7 @@ import hashlib
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -10,9 +11,16 @@ from .models import Incident, VouchRecord
 from .serializers import IncidentSerializer, IncidentDetailSerializer
 
 
+
+class IncidentPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
 class IncidentListView(generics.ListAPIView):
     serializer_class = IncidentSerializer
     permission_classes = [AllowAny]
+    pagination_class = IncidentPagination
 
     def get_queryset(self):
         qs = Incident.objects.filter(

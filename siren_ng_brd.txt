@@ -1,8 +1,9 @@
 ================================================================================
 SIREN.NG — FULL BUSINESS REQUIREMENTS DOCUMENT
-Version 4 — Final
+Version 5 — In Deployment
 March 2026
-Stack: Python, Django, Supabase PostgreSQL, React, WhatsApp, Claude AI, Paystack
+Stack: Python 3.13, Django 5.1, Supabase PostgreSQL, React, WhatsApp, Claude AI, Paystack
+Phases 1–6: COMPLETE. Phase 7 (Deployment): IN PROGRESS.
 ================================================================================
 
 READ THIS BEFORE WRITING ANY CODE.
@@ -15,7 +16,9 @@ QUICK REFERENCE
 ================================================================================
 
 Project name (Django):  sirenapp
+Python version:         3.13
 Database:               Supabase PostgreSQL (plain engine, no GeoDjango)
+DB adapter:             psycopg[binary]>=3.1 (psycopg3 — NOT psycopg2)
 AI verification:        Anthropic Claude (claude-sonnet-4-6)
 WhatsApp:               Twilio WhatsApp Business API
 Payments:               Paystack
@@ -23,7 +26,9 @@ Map tiles:              OpenStreetMap (free, no API key)
 Task queue:             Celery + Redis (Railway)
 Real-time:              Django Channels + WebSocket
 Spatial queries:        Raw Haversine SQL in utils/distance.py
+Deployment:             Railway (nixpacks, GitHub-connected)
 NO GeoDjango. NO PointField. NO GDAL. NO PolygonField. Ever.
+NO psycopg2. Use psycopg3 (psycopg[binary]) only.
 
 ================================================================================
 SECTION 1 — WHAT WE ARE BUILDING
@@ -127,9 +132,10 @@ SECTION 2 — TECHNOLOGY STACK
 2.1 BACKEND PACKAGES (requirements.txt)
 --------------------------------------------------------------------------------
 
+setuptools<82
 django==5.1
 djangorestframework==3.15
-psycopg2-binary==2.9
+psycopg[binary]>=3.1          <- psycopg3 (NOT psycopg2). Bundles libpq. Python 3.13 compatible.
 dj-database-url==2.2
 python-decouple==3.8
 djangorestframework-simplejwt==5.3
@@ -146,6 +152,9 @@ cloudinary
 django-cloudinary-storage
 django-celery-beat==2.7
 requests
+gunicorn==22.0.0
+pytz
+groq
 
 --------------------------------------------------------------------------------
 2.2 FRONTEND PACKAGES (package.json)
@@ -216,11 +225,13 @@ siren_ng/                         <- Root folder. manage.py lives here.
 │   ├── whatsapp/                 <- PHASE 2
 │   │   ├── __init__.py
 │   │   ├── apps.py
+│   │   ├── models.py             <- ConversationState (Section 7.6)
 │   │   ├── views.py              <- Twilio webhook
 │   │   ├── urls.py
 │   │   ├── handlers.py           <- Routes all inbound messages
 │   │   ├── templates.py          <- All outbound message strings
-│   │   └── tasks.py              <- Async WhatsApp sends
+│   │   ├── tasks.py              <- Async WhatsApp sends
+│   │   └── admin.py
 │   │
 │   ├── responders/               <- PHASE 3
 │   │   ├── __init__.py
@@ -966,6 +977,60 @@ class SubscriptionAlert(models.Model):
     class Meta:
         unique_together = ('subscription', 'incident')
 
+--------------------------------------------------------------------------------
+7.6 WHATSAPP APP MODELS (apps/whatsapp/models.py)
+--------------------------------------------------------------------------------
+
+from django.db import models
+
+
+class ConversationState(models.Model):
+    """
+    Tracks multi-step WhatsApp conversation state for a single phone number.
+    Used by: responder registration, org registration, WATCH flow,
+    and first-time consent. Every multi-step flow writes here.
+    Rows expire after 30 minutes of inactivity (expires_at).
+
+    is_onboarding(phone_hash) checks for an active (non-expired) row:
+      return ConversationState.objects.filter(
+          phone_hash=phone_hash,
+          expires_at__gt=timezone.now()
+      ).exists()
+    """
+    phone_hash = models.CharField(max_length=64, unique=True)
+    step       = models.CharField(max_length=50)
+    context    = models.JSONField(default=dict)   # Arbitrary state bag
+    expires_at = models.DateTimeField()           # now() + 30 minutes on each write
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def touch(self):
+        """Reset expiry to 30 minutes from now."""
+        from django.utils import timezone
+        from datetime import timedelta
+        self.expires_at = timezone.now() + timedelta(minutes=30)
+        self.save(update_fields=['expires_at', 'updated_at'])
+
+    @classmethod
+    def set_step(cls, phone_hash, step, context=None):
+        """Create or update conversation state, resetting expiry."""
+        from django.utils import timezone
+        from datetime import timedelta
+        expires = timezone.now() + timedelta(minutes=30)
+        obj, _ = cls.objects.update_or_create(
+            phone_hash=phone_hash,
+            defaults={'step': step, 'context': context or {}, 'expires_at': expires}
+        )
+        return obj
+
+    @classmethod
+    def clear(cls, phone_hash):
+        """Delete state when a flow completes or is cancelled."""
+        cls.objects.filter(phone_hash=phone_hash).delete()
+
 ================================================================================
 SECTION 8 — CELERY SETUP
 ================================================================================
@@ -1241,6 +1306,7 @@ Return this exact JSON:
   "ai_confidence": 0.0 to 1.0,
   "fraud_score": 0.0 to 1.0,
   "suggested_skills": ["list of skill codes"],
+  "zone_name": "Lagos zone name from address e.g. Surulere, Ikeja, Lekki, Alimosho — or null if unknown",
   "reasoning": "one sentence"
 }}
 
@@ -1263,6 +1329,7 @@ fraud_score above 0.7 means the report looks fake."""
     incident.ai_raw_response = result
     incident.ai_confidence   = result.get('ai_confidence', 0.0)
     incident.fraud_score     = result.get('fraud_score', 0.0)
+    incident.zone_name       = result.get('zone_name') or ''  # Claude extracts from address text
 
     if not result.get('eligible') or incident.fraud_score > 0.7:
         _transition(incident, 'REJECTED', 'AI', result.get('rejection_reason', ''))
@@ -1322,6 +1389,7 @@ SECTION 11 — WHATSAPP FLOWS
 
 def route_inbound(from_number, body, media_urls, location):
     body_upper = body.strip().upper()
+    phone_hash = hashlib.sha256(from_number.encode()).hexdigest()
 
     # Responder commands
     if body_upper in ['YES', 'NO', 'ONSCENE', 'DONE', 'HELP']:
@@ -1353,9 +1421,13 @@ def route_inbound(from_number, body, media_urls, location):
     if location and location.get('latitude'):
         return handle_location_share(from_number, location, body)
 
-    # Onboarding in progress
+    # Onboarding in progress (includes consent step)
     if is_onboarding(from_number):
         return handle_onboarding_step(from_number, body)
+
+    # First-time user: send NDPR consent before processing their message
+    if is_first_time_user(phone_hash):
+        return handle_first_time_consent(from_number, body, media_urls, location)
 
     # Default: treat as emergency report
     return create_incident_from_message(from_number, body, media_urls, location)
@@ -1526,7 +1598,107 @@ SIREN:  "✅ Saved — Timi school (School/Child location)
         To stop alerts for this location: reply STOP Timi school"
 
 --------------------------------------------------------------------------------
-11.7 SUBSCRIPTION ALERT MESSAGE
+11.7 FIRST-TIME USER CONSENT (NDPR)
+--------------------------------------------------------------------------------
+
+TRIGGER: is_first_time_user(phone_hash) returns True — no prior incident,
+responder record, or subscription for this phone number.
+
+FLOW:
+  1. Siren receives any first message from an unknown number.
+  2. Store original message + media_urls + location in ConversationState
+     with step='awaiting_consent'.
+  3. Send consent message.
+  4. User replies OK (or any affirmative).
+  5. ConversationState context['original_message'] is replayed into
+     create_incident_from_message() (or whichever handler was appropriate).
+  6. ConversationState cleared.
+
+SIREN (first message received):
+  "Welcome to Siren — Lagos community emergency coordination.
+
+  Before I can help, I need your consent:
+
+  ✅ Your WhatsApp number will be stored (hashed for privacy) to:
+  - Coordinate emergency response to reports you make
+  - Send you alerts if you subscribe to location monitoring
+  - Notify you if you register as a community responder
+
+  We never share your number with advertisers.
+  This complies with Nigeria's NDPR.
+
+  Reply OK to continue.
+  Reply STOP at any time to opt out of all messages."
+
+USER:   "OK"
+
+SIREN:  [continues processing original message normally]
+
+CODE PATTERN (handlers.py):
+
+import hashlib
+from apps.whatsapp.models import ConversationState
+
+
+def is_first_time_user(phone_hash):
+    from apps.incidents.models import Incident
+    from apps.responders.models import Responder
+    from apps.subscriptions.models import LocationSubscription
+    return not any([
+        Incident.objects.filter(reporter_hash=phone_hash).exists(),
+        Responder.objects.filter(phone_hash=phone_hash).exists(),
+        LocationSubscription.objects.filter(phone_hash=phone_hash).exists(),
+    ])
+
+
+def handle_first_time_consent(from_number, body, media_urls, location):
+    import hashlib
+    phone_hash = hashlib.sha256(from_number.encode()).hexdigest()
+    # Store original message for replay after consent
+    ConversationState.set_step(
+        phone_hash=phone_hash,
+        step='awaiting_consent',
+        context={
+            'original_message': body,
+            'media_urls': media_urls or [],
+            'location': location or {},
+        }
+    )
+    from apps.whatsapp.tasks import send_whatsapp_text
+    from apps.whatsapp.templates import consent_message
+    send_whatsapp_text.delay(from_number, consent_message())
+
+
+def handle_onboarding_step(from_number, body):
+    import hashlib
+    phone_hash = hashlib.sha256(from_number.encode()).hexdigest()
+    state = ConversationState.objects.filter(phone_hash=phone_hash).first()
+    if not state:
+        return
+
+    if state.step == 'awaiting_consent':
+        if body.strip().upper() in ['OK', 'YES', 'AGREE', '1']:
+            # Replay original message
+            original = state.context.get('original_message', '')
+            media_urls = state.context.get('media_urls', [])
+            location = state.context.get('location', {})
+            ConversationState.clear(phone_hash)
+            return create_incident_from_message(from_number, original, media_urls, location)
+        else:
+            # They said something else — re-prompt once
+            from apps.whatsapp.tasks import send_whatsapp_text
+            send_whatsapp_text.delay(from_number,
+                "Reply OK to continue, or STOP to opt out of all messages.")
+        return
+
+    # ... other step handlers (responder registration, WATCH flow, etc.) ...
+
+NOTE: is_onboarding() must check ConversationState for any active (non-expired)
+row, including awaiting_consent. This is intentional — all multi-step state
+lives in the same table.
+
+--------------------------------------------------------------------------------
+11.8 SUBSCRIPTION ALERT MESSAGE
 --------------------------------------------------------------------------------
 
 SIREN:  "🔴 SIREN ALERT — Timi school
@@ -1545,7 +1717,7 @@ SIREN:  "🔴 SIREN ALERT — Timi school
         Reply STOP Timi school to pause alerts for this location."
 
 --------------------------------------------------------------------------------
-11.8 RESPONDER NOTIFICATION
+11.9 RESPONDER NOTIFICATION
 --------------------------------------------------------------------------------
 
 SIREN:  "🚨 INCIDENT NEAR YOU
@@ -2041,35 +2213,46 @@ Goal: WhatsApp message creates incident, reporter gets confirmation with
       tracking link containing the full incident URL.
 ================================================================================
 
-Step 1:  Create apps/whatsapp/ with all files.
+Step 1:  Create apps/whatsapp/ with all files:
+         __init__.py, apps.py, models.py, views.py, handlers.py,
+         templates.py, tasks.py, urls.py, admin.py
 
-Step 2:  Write apps/whatsapp/views.py — Twilio webhook handler.
+Step 2:  Write apps/whatsapp/models.py from Section 7.6.
+         Contains ConversationState only.
+         Run: python manage.py makemigrations whatsapp && python manage.py migrate
+
+Step 3:  Write apps/whatsapp/views.py — Twilio webhook handler.
          MUST validate X-Twilio-Signature header.
          Responds 200 immediately. Calls route_inbound() then queues tasks.
 
-Step 3:  Write apps/whatsapp/handlers.py from Section 11.1.
+Step 4:  Write apps/whatsapp/handlers.py from Section 11.1.
+         Include: is_first_time_user(), handle_first_time_consent(),
+         handle_onboarding_step(), is_onboarding() from Section 11.7.
+         is_onboarding() checks ConversationState for any non-expired row.
 
-Step 4:  Write apps/whatsapp/templates.py
+Step 5:  Write apps/whatsapp/templates.py
          Every outbound message string as a Python function.
          Functions take incident or context as argument and return string.
          All message text from Section 11 flows through here.
+         Include: consent_message() for Section 11.7 consent text.
 
-Step 5:  Write apps/whatsapp/tasks.py with these tasks:
+Step 6:  Write apps/whatsapp/tasks.py with these tasks:
          - send_whatsapp_text(to_number, message) — base Twilio send
          - notify_reporter_verified(incident_id) — sends tracking link
          - notify_reporter_rejected(incident_id, reason)
          - notify_reporter_verifying(incident_id)
          - post_community_announcement(incident_id) — posts to zone group
 
-Step 6:  Write apps/whatsapp/urls.py. Add to sirenapp/urls.py.
+Step 7:  Write apps/whatsapp/urls.py. Add to sirenapp/urls.py.
 
-Step 7:  Set Twilio sandbox webhook URL to your ngrok or Railway URL:
+Step 8:  Set Twilio sandbox webhook URL to your ngrok or Railway URL:
          https://[your-url]/api/ingest/whatsapp/
 
-Step 8:  TEST PHASE 2:
-         Send WhatsApp message to Siren number
-         Check: incident created in admin
-         Check: Claude verifies
+Step 9:  TEST PHASE 2:
+         Send WhatsApp message to Siren number for the first time
+         Check: consent message received
+         Reply OK — check original message processed, incident created
+         Check: Claude verifies (zone_name populated from address text)
          Check: reporter receives WhatsApp confirmation with tracking link
          Open tracking link in browser
          Check: incident page shows correct status
@@ -2260,7 +2443,45 @@ Step 8:  TEST PHASE 6:
 ================================================================================
 PHASE 7 — HARDENING AND DEPLOYMENT
 Goal: Production-ready. Live on Railway. Twilio connected to production URL.
+Status: IN PROGRESS (Railway deploying, Steps 7+ active)
 ================================================================================
+
+DEPLOYMENT ENVIRONMENT:
+  Platform:    Railway (GitHub-connected, auto-deploy on push)
+  Build tool:  nixpacks (nixpacks.toml in project root)
+  Python:      3.13 (via mise in nixpacks)
+  Start cmd:   daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application
+  Migrations:  run automatically in nixpacks build phase
+
+DEPLOYMENT FIXES APPLIED (as of March 2026):
+  - psycopg2-binary removed. Use psycopg[binary]>=3.1 (psycopg3).
+    Reason: psycopg2 binary wheel fails on Python 3.13 in Railway's Linux
+    container — cannot find libpq.so.5 at runtime. psycopg3's binary wheel
+    bundles libpq internally and has full Python 3.13 support.
+  - nixpacks.toml: removed postgresql from nixPkgs (not needed with psycopg3).
+  - django.db.backends.postgresql engine still used — Django 5.1 supports
+    psycopg3 natively with this same engine string.
+  - DATABASE_URL must use Supabase Direct Connection URI (port 5432).
+    Do NOT use the pooler URI (port 6543).
+
+nixpacks.toml CURRENT STATE:
+  providers = ["python"]
+  [phases.setup]
+  nixPkgs = ["python313", "python313Packages.pip", "nodejs_20"]
+  [phases.install]
+  cmds = [
+    "python3 -m pip install --upgrade pip",
+    "python3 -m pip install -r requirements.txt",
+    "cd frontend && npm ci"
+  ]
+  [phases.build]
+  cmds = [
+    "cd frontend && npm run build",
+    "python3 manage.py collectstatic --noinput",
+    "python3 manage.py migrate --noinput"
+  ]
+  [start]
+  cmd = "daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application"
 
 Step 1:  Add rate limiting to all public endpoints (django-ratelimit).
          Vouch: 1 per session per incident.
@@ -2291,13 +2512,15 @@ Step 6:  Set DEBUG=False in production .env.
          Add production Railway domain to ALLOWED_HOSTS.
          Add production domain to CORS_ALLOWED_ORIGINS.
 
-Step 7:  Deploy Django to Railway:
-         Connect GitHub repo.
-         Add all environment variables from Section 5.
-         Add start command: daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application
-         Ensure python manage.py migrate runs on deploy.
+Step 7:  [IN PROGRESS] Deploy Django to Railway:
+         Connect GitHub repo. ✓ DONE
+         Add all environment variables from Section 5. (verify all set)
+         Start command in nixpacks.toml: daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application ✓ DONE
+         Migrations run automatically in build phase. ✓ DONE
+         Fix psycopg3 adapter crash. ✓ DONE (switched to psycopg[binary]>=3.1)
 
 Step 8:  Point Twilio webhook URL to production Railway URL.
+         Set SITE_URL in .env to the Railway domain for Twilio and Paystack callbacks.
 
 Step 9:  Set up Paystack live keys in production .env.
          Test live donation flow with real small amount.
@@ -2402,9 +2625,25 @@ Read all of these before writing a single line of code.
     claiming the same item twice. Always catch IntegrityError on claim creation
     and return a 200 (not 400) with message "You have already claimed this item".
 
+16. CONVERSATION STATE IS IN apps/whatsapp/models.py.
+    ConversationState is the single store for all multi-step WhatsApp flows:
+    responder registration, org registration, WATCH, and first-time consent.
+    is_onboarding(phone_hash) checks ConversationState for any non-expired row.
+    All flows set step='awaiting_consent' | 'registering_responder' | 'watching_*' etc.
+    Rows expire 30 minutes after the last write. Clear on flow completion.
+
+17. DATABASE ADAPTER IS PSYCOPG3 (NOT PSYCOPG2).
+    requirements.txt uses: psycopg[binary]>=3.1
+    DO NOT add psycopg2 or psycopg2-binary. psycopg2 fails on Python 3.13 in
+    Railway's Linux container because it cannot find libpq.so.5 at runtime.
+    psycopg3's binary wheel bundles libpq internally — no system lib needed.
+    Django's engine string stays the same: 'django.db.backends.postgresql'
+    Django 5.1 supports psycopg3 natively with no other changes required.
+
 ================================================================================
 END OF DOCUMENT
 ================================================================================
-Siren.ng BRD v4 Final — March 2026
-Python + Django + Supabase PostgreSQL + React + WhatsApp + Claude AI + Paystack
+Siren.ng BRD v5 — March 2026 — In Deployment
+Python 3.13 + Django 5.1 + psycopg3 + Supabase PostgreSQL + React + WhatsApp + Claude AI + Paystack
+Phases 1–6 complete. Phase 7 (Railway deployment) in progress.
 ================================================================================

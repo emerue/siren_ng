@@ -5,11 +5,11 @@
 providers = ["python"]
 
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["python313", "nodejs_20"]
 
 [phases.install]
 cmds = [
-    "pip install -r requirements.txt",
+    "python -m pip install -r requirements.txt",
     "cd frontend && npm ci"
 ]
 

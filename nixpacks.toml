@@ -1,15 +1,11 @@
-# nixpacks.toml — Railway build configuration
-# Installs Node.js alongside Python so the React frontend can be built
-# before Django collectstatic runs.
-
+# nixpacks.toml
 providers = ["python"]
 
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["python313", "python313Packages.pip", "nodejs_20"]
 
 [phases.install]
 cmds = [
-    "python3 -m ensurepip",
     "python3 -m pip install --upgrade pip",
     "python3 -m pip install -r requirements.txt",
     "cd frontend && npm ci"
@@ -21,5 +17,6 @@ cmds = [
     "python3 manage.py collectstatic --noinput",
     "python3 manage.py migrate --noinput"
 ]
+
 [start]
 cmd = "daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application"

@@ -5,19 +5,21 @@
 providers = ["python"]
 
 [phases.setup]
-nixPkgs = ["python313", "nodejs_20"]
+nixPkgs = ["nodejs_20"]
 
 [phases.install]
 cmds = [
-    "python -m pip install -r requirements.txt",
+    "python3 -m ensurepip",
+    "python3 -m pip install --upgrade pip",
+    "python3 -m pip install -r requirements.txt",
     "cd frontend && npm ci"
 ]
 
 [phases.build]
 cmds = [
     "cd frontend && npm run build",
-    "python manage.py collectstatic --noinput",
-    "python manage.py migrate --noinput"
+    "python3 manage.py collectstatic --noinput",
+    "python3 manage.py migrate --noinput"
 ]
 [start]
 cmd = "daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application"

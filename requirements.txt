@@ -1,3 +1,4 @@
+setuptools<82
 django==5.1
 djangorestframework==3.15
 psycopg2-binary==2.9
@@ -18,5 +19,7 @@ django-cloudinary-storage
 django-celery-beat==2.7
 requests
 gunicorn==22.0.0
-setuptools
+# setuptools pinned at top
 pytz
+
+groq

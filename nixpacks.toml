@@ -5,7 +5,7 @@
 providers = ["python"]
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm-9_x"]
+nixPkgs = ["nodejs_20"]
 
 [phases.install]
 cmds = [
@@ -16,6 +16,8 @@ cmds = [
 [phases.build]
 cmds = [
     "cd frontend && npm run build",
-    "python manage.py collectstatic --noinput"
+    "python manage.py collectstatic --noinput",
+    "python manage.py migrate --noinput"
 ]
-# No [start] here — Railway uses the Procfile web process
+[start]
+cmd = "daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application"

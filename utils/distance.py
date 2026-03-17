@@ -26,17 +26,19 @@ def haversine_query(table, lat_field, lng_field, incident_lat, incident_lng,
     params = base_params + filter_params + [radius_km]
 
     sql = f"""
-        SELECT *,
-          (6371 * acos(
-            LEAST(1.0,
-              cos(radians(%s)) * cos(radians({lat_field})) *
-              cos(radians({lng_field}) - radians(%s)) +
-              sin(radians(%s)) * sin(radians({lat_field}))
-            )
-          )) AS distance_km
-        FROM {table}
-        WHERE (1=1) {extra_filters}
-        HAVING distance_km <= %s
+        SELECT * FROM (
+          SELECT *,
+            (6371 * acos(
+              LEAST(1.0,
+                cos(radians(%s)) * cos(radians({lat_field})) *
+                cos(radians({lng_field}) - radians(%s)) +
+                sin(radians(%s)) * sin(radians({lat_field}))
+              )
+            )) AS distance_km
+          FROM {table}
+          WHERE (1=1) {extra_filters}
+        ) subq
+        WHERE distance_km <= %s
         ORDER BY distance_km ASC
         LIMIT {limit}
     """

@@ -7,6 +7,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config("SECRET_KEY")
 DEBUG = config("DEBUG", default=False, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
+# Auto-allow Railway-generated domains
+import os as _os
+_railway_host = _os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+if _railway_host and _railway_host not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_railway_host)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -126,6 +131,11 @@ CLOUDINARY_STORAGE = {
 
 ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
 ANTHROPIC_MODEL   = config("ANTHROPIC_MODEL", default="claude-sonnet-4-6")
+
+# AI provider: "anthropic" or "groq"
+AI_PROVIDER = config("AI_PROVIDER", default="groq")
+GROQ_API_KEY = config("GROQ_API_KEY", default="")
+GROQ_MODEL   = config("GROQ_MODEL", default="llama-3.3-70b-versatile")
 
 TWILIO_ACCOUNT_SID     = config("TWILIO_ACCOUNT_SID", default="")
 TWILIO_AUTH_TOKEN      = config("TWILIO_AUTH_TOKEN", default="")

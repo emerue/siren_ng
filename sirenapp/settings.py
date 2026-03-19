@@ -73,15 +73,38 @@ DATABASES = {
     )
 }
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [config("REDIS_URL", default="redis://localhost:6379/0")]},
-    }
-}
+_REDIS_URL = config("REDIS_URL", default="")
 
-CELERY_BROKER_URL = config("REDIS_URL", default="redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = config("REDIS_URL", default="redis://localhost:6379/0")
+if _REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [_REDIS_URL]},
+        }
+    }
+    CELERY_BROKER_URL = _REDIS_URL
+    CELERY_RESULT_BACKEND = _REDIS_URL
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": _REDIS_URL,
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
+    CELERY_BROKER_URL = "memory://"
+    CELERY_RESULT_BACKEND = "cache+memory://"
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "django_cache",
+        }
+    }
+
 CELERY_TASK_ALWAYS_EAGER = config("CELERY_ALWAYS_EAGER", default=False, cast=bool)
 CELERY_TIMEZONE = "Africa/Lagos"
 CELERY_TASK_SERIALIZER = "json"

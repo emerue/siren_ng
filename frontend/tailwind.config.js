@@ -4,15 +4,34 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary:     '#C0392B',
-        success:     '#1A6B3C',
-        warning:     '#D35400',
-        bg:          '#FAFAFA',
-        surface:     '#FFFFFF',
-        textPrimary: '#0D0D0D',
-        textBody:    '#4A4A4A',
-        textMuted:   '#9E9E9E',
-        border:      '#E8E8E8',
+        // Brand
+        primary: '#1B2A4A',  // Siren Navy — buttons, nav, headings
+        accent: '#E8A020',  // Siren Amber — highlights, Guardian accents
+
+        // Status (incidents only — never decorative)
+        alert: '#DC2626',  // CRITICAL severity only
+        warning: '#EA580C',  // HIGH severity
+        caution: '#D97706',  // MEDIUM / VERIFYING
+        success: '#16A34A',  // RESOLVED / SAFE / ARRIVED
+        verified: '#2563EB',  // VERIFIED status
+        agency: '#7C3AED',  // AGENCY_NOTIFIED
+        rejected: '#9CA3AF',  // REJECTED
+
+        // Feature identity
+        guardian: '#0D9488',  // Guardian Mode UI
+        commute: '#0284C7',  // Commute Shield UI
+
+        // Surfaces
+        bg: '#F8F7F5',  // Warm white background
+        surface: '#FFFFFF',  // Cards
+
+        // Text
+        textPrimary: '#111827',
+        textBody: '#374151',
+        textMuted: '#6B7280',
+
+        // Border
+        border: '#E5E7EB',
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],

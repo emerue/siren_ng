@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { getIncident, initiateDonation } from '../api'
 import type { Incident } from '../types'
+import Nav from '../components/Nav'
 
 const FUNDS = [
   { value: 'VICTIM', icon: '🏠', label: 'Victim Relief', desc: 'Direct to the affected family' },
@@ -44,9 +45,10 @@ export default function DonatePage() {
 
   return (
     <div className="min-h-screen bg-bg font-sans">
-      <div className="bg-primary text-white px-6 py-4">
-        <h1 className="font-bold text-lg">Support this Incident</h1>
-        {incident && <p className="text-white/80 text-sm">{incident.incident_type} — {incident.zone_name}</p>}
+      <Nav />
+      <div className="bg-white border-b border-border px-6 py-4">
+        <h1 className="font-bold text-lg text-textPrimary">Support this Incident</h1>
+        {incident && <p className="text-textMuted text-sm">{incident.incident_type} — {incident.zone_name}</p>}
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-4">

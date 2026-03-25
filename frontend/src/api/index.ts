@@ -1,12 +1,9 @@
 import axios from 'axios'
 
 const api = axios.create({
-  // Empty string → relative URLs (same-origin, works when Django serves the SPA)
-  // Set VITE_API_BASE_URL=http://localhost:8000 in .env for local dev with Vite dev server
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '',
 })
 
-// Attach JWT if present
 api.interceptors.request.use((config) => {
   const token = sessionStorage.getItem('access_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -37,6 +34,22 @@ export const resolveIncident = (id: string) =>
 
 export const webIngest = (data: Record<string, unknown>) =>
   api.post('/api/ingest/web/', data).then((r) => r.data)
+
+// ── Media ─────────────────────────────────────────────────────────────────────
+export const getIncidentMedia = (incidentId: string) =>
+  api.get(`/api/incidents/${incidentId}/media/list/`).then((r) => r.data)
+
+export const uploadMedia = (incidentId: string, files: File | File[]) => {
+  const form = new FormData()
+  const fileArray = Array.isArray(files) ? files : [files]
+  fileArray.forEach(f => form.append('files', f))
+  return api.post(`/api/incidents/${incidentId}/media/`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then((r) => r.data)
+}
+
+export const deleteMedia = (incidentId: string, mediaId: number) =>
+  api.delete(`/api/incidents/${incidentId}/media/${mediaId}/`).then((r) => r.data)
 
 // ── Resources ─────────────────────────────────────────────────────────────────
 export const getResources = (incidentId: string) =>

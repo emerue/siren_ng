@@ -1,9 +1,17 @@
 from django.contrib import admin
-from .models import Incident, ResponseLog, VouchRecord
+from .models import Incident, ResponseLog, VouchRecord, IncidentMedia
+
+
+class IncidentMediaInline(admin.TabularInline):
+    model = IncidentMedia
+    readonly_fields = ["media_type", "public_url", "storage_path", "file_size", "uploaded_by_hash", "upload_timestamp"]
+    extra = 0
+    can_delete = True
 
 
 @admin.register(Incident)
 class IncidentAdmin(admin.ModelAdmin):
+    inlines = [IncidentMediaInline]
     list_display  = ["id", "incident_type", "severity", "status", "zone_name",
                      "is_infrastructure", "vouch_count", "ai_confidence", "fraud_score",
                      "total_donations_kobo", "created_at"]
@@ -16,8 +24,7 @@ class IncidentAdmin(admin.ModelAdmin):
     def mark_verified(self, req, qs):
         from .tasks import _transition
         for incident in qs:
-            old = incident.status
-            if old != "VERIFIED":
+            if incident.status != "VERIFIED":
                 _transition(incident, "VERIFIED", "admin", "Manually verified via admin panel")
                 incident.save()
     mark_verified.short_description = "Mark selected as VERIFIED (with audit log)"
@@ -62,3 +69,13 @@ class ResponseLogAdmin(admin.ModelAdmin):
 class VouchRecordAdmin(admin.ModelAdmin):
     list_display = ["incident", "session_hash", "source", "is_suspicious", "created_at"]
     list_filter  = ["source", "is_suspicious"]
+
+
+@admin.register(IncidentMedia)
+class IncidentMediaAdmin(admin.ModelAdmin):
+    list_display   = ["id", "incident", "media_type", "file_size", "upload_timestamp"]
+    list_filter    = ["media_type"]
+    readonly_fields = ["incident", "media_type", "public_url", "storage_path",
+                       "file_size", "uploaded_by_hash", "upload_timestamp"]
+    search_fields  = ["incident__id", "storage_path"]
+    ordering       = ["-upload_timestamp"]

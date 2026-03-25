@@ -1,11 +1,12 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
 import { formatDistanceToNow } from 'date-fns'
-import { getIncident, getResources, getDonationSummary, dispatchIncident, resolveIncident } from '../api'
+import { getIncident, getResources, getDonationSummary, dispatchIncident, resolveIncident, deleteMedia } from '../api'
 import DashboardLayout from '../components/DashboardLayout'
-import type { Incident, ResourceItem } from '../types'
+import type { Incident, ResourceItem, IncidentMedia } from '../types'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -13,6 +14,87 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
+
+function AdminMediaGallery({ incidentId, media }: { incidentId: string; media: IncidentMedia[] }) {
+  const qc = useQueryClient()
+  const [lightbox, setLightbox] = useState<IncidentMedia | null>(null)
+  const [confirm, setConfirm] = useState<number | null>(null)
+
+  const deleteMut = useMutation({
+    mutationFn: (mediaId: number) => deleteMedia(incidentId, mediaId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['incident', incidentId] })
+      setConfirm(null)
+    },
+  })
+
+  if (media.length === 0) return null
+
+  return (
+    <div className="bg-white rounded-xl border border-border p-5 mb-4">
+      <h3 className="font-semibold text-textPrimary mb-3">
+        Media Evidence · {media.length} file{media.length !== 1 ? 's' : ''}
+      </h3>
+      <div className="grid grid-cols-3 gap-2">
+        {media.map((m) => (
+          <div key={m.id} className="relative group">
+            <button
+              onClick={() => m.media_type === 'image' && setLightbox(m)}
+              className="w-full aspect-square rounded-lg overflow-hidden bg-gray-100 block"
+            >
+              {m.media_type === 'image' ? (
+                <img src={m.public_url} alt="" className="w-full h-full object-cover group-hover:opacity-90 transition" />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 text-white">
+                  <span className="text-3xl">▶</span>
+                  <span className="text-xs opacity-70 mt-1">Video</span>
+                </div>
+              )}
+            </button>
+            {/* Delete button */}
+            <button
+              onClick={() => setConfirm(m.id)}
+              className="absolute top-1 right-1 w-6 h-6 bg-red-600 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center shadow"
+            >
+              ×
+            </button>
+            <p className="text-xs text-textMuted mt-1 text-center">
+              {(m.file_size / 1024).toFixed(0)}KB
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Delete confirm */}
+      {confirm !== null && (
+        <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3 flex items-center justify-between">
+          <span className="text-sm text-red-700">Delete this file permanently?</span>
+          <div className="flex gap-2">
+            <button onClick={() => setConfirm(null)} className="text-xs px-3 py-1 border border-border rounded-lg">Cancel</button>
+            <button
+              onClick={() => deleteMut.mutate(confirm)}
+              disabled={deleteMut.isPending}
+              className="text-xs px-3 py-1 bg-red-600 text-white rounded-lg disabled:opacity-50"
+            >
+              {deleteMut.isPending ? '...' : 'Delete'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button className="absolute top-4 right-4 text-white text-3xl w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full">×</button>
+          <img src={lightbox.public_url} alt="" className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function DashboardIncidentDetail() {
   const { id } = useParams<{ id: string }>()
@@ -48,6 +130,8 @@ export default function DashboardIncidentDetail() {
   if (isLoading) return <DashboardLayout><div className="p-8 text-textMuted">Loading...</div></DashboardLayout>
   if (!incident) return <DashboardLayout><div className="p-8 text-textMuted">Not found.</div></DashboardLayout>
 
+  const mediaItems: IncidentMedia[] = incident.media ?? []
+
   return (
     <DashboardLayout>
       <div className="p-8 max-w-3xl">
@@ -77,6 +161,11 @@ export default function DashboardIncidentDetail() {
             Fraud score: {(incident.fraud_score * 100).toFixed(0)}%
           </div>
         </div>
+
+        {/* Media */}
+        {mediaItems.length > 0 && (
+          <AdminMediaGallery incidentId={id!} media={mediaItems} />
+        )}
 
         {/* AI result */}
         {incident.ai_raw_response && Object.keys(incident.ai_raw_response).length > 0 && (
@@ -136,12 +225,12 @@ export default function DashboardIncidentDetail() {
         {donationSummary && (
           <div className="bg-white rounded-xl border border-border p-5">
             <h3 className="font-semibold mb-3 text-textPrimary">Donations</h3>
-            <div className="text-2xl font-bold text-textPrimary">₦{donationSummary.total_naira?.toLocaleString()}</div>
+            <div className="text-2xl font-bold text-textPrimary">&#8358;{donationSummary.total_naira?.toLocaleString()}</div>
             <div className="text-textMuted text-sm">{donationSummary.donation_count} donors</div>
             {donationSummary.fund_breakdown && Object.entries(donationSummary.fund_breakdown).map(([fund, naira]) => (
               <div key={fund} className="flex justify-between text-sm mt-2">
                 <span className="text-textBody">{fund}</span>
-                <span className="font-medium">₦{(naira as number).toLocaleString()}</span>
+                <span className="font-medium">&#8358;{(naira as number).toLocaleString()}</span>
               </div>
             ))}
           </div>

@@ -12,7 +12,16 @@
       "Bash(python3:*)",
       "Bash(.venv/Scripts/pip.exe install:*)",
       "Bash(.venv/Scripts/pip.exe show:*)",
-      "Bash(DJANGO_SETTINGS_MODULE=sirenapp.settings .venv/Scripts/python.exe:*)"
+      "Bash(DJANGO_SETTINGS_MODULE=sirenapp.settings .venv/Scripts/python.exe:*)",
+      "Bash(sed:*)",
+      "Bash(git:*)",
+      "Bash(\"C:/Users/JudeEmerue/Downloads/vscode/siren_ng/apps/incidents/serializers.py\":*)",
+      "Bash(grep:*)",
+      "Bash(for f in frontend/src/pages/MapPage.tsx frontend/src/pages/OrgsPage.tsx frontend/src/pages/DonatePage.tsx frontend/src/pages/FeedPage.tsx)",
+      "Bash(do echo \"=== $f ===\")",
+      "Read(//c/Users/JudeEmerue/Downloads/vscode/siren_ng/**)",
+      "Bash(done)",
+      "Bash(for f in frontend/src/pages/MapPage.tsx frontend/src/pages/FeedPage.tsx frontend/src/pages/OrgsPage.tsx frontend/src/pages/DonatePage.tsx)"
     ]
   }
 }

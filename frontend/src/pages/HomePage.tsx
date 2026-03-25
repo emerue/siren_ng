@@ -2,12 +2,18 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { getActiveIncidents, getIncidents } from '../api'
 import type { Incident } from '../types'
+import Nav from '../components/Nav'
 import { formatDistanceToNow } from 'date-fns'
 
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '+2349000000000'
-const WA = WHATSAPP_NUMBER.replace('+', '')
 
 const ZONES = ['Lagos Island', 'Surulere', 'Ikeja', 'Lekki', 'Victoria Island', 'Oshodi', 'Yaba', 'Apapa']
+
+const SEVERITY_COLOR: Record<string, string> = {
+  CRITICAL: 'bg-red-600 text-white',
+  HIGH: 'bg-red-100 text-red-700',
+  MEDIUM: 'bg-amber-100 text-amber-700',
+  LOW: 'bg-yellow-100 text-yellow-700',
+}
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -16,6 +22,7 @@ function StatusBadge({ status }: { status: string }) {
     VERIFYING: 'bg-yellow-100 text-amber-700',
     RESOLVED: 'bg-green-100 text-green-800',
     REJECTED: 'bg-gray-100 text-gray-500',
+    AGENCY_NOTIFIED: 'bg-purple-100 text-purple-800',
   }
   return (
     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${map[status] || 'bg-gray-100 text-gray-500'}`}>
@@ -24,25 +31,10 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-const WA_FEATURES = [
-  { icon: '🚨', text: 'Report emergency — send any description' },
-  { icon: '📍', text: 'Save a watch location — type WATCH' },
-  { icon: '🩺', text: 'Join as responder — type RESPONDER' },
-  { icon: '🏥', text: 'Register organisation — type REGISTER ORG' },
-  { icon: '✅', text: 'Vouch for incident — type VOUCH <id>' },
-  { icon: '🔔', text: 'Manage alerts — type MY ALERTS' },
-  { icon: '🛑', text: 'Stop alerts — type STOP <label>' },
-]
-
-const WEB_FEATURES = [
-  { icon: '🚨', text: 'Report emergency with map pin + photos', link: '/report' },
-  { icon: '📍', text: 'Save watch locations with radius control', link: '/watch' },
-  { icon: '🩺', text: 'Join as responder via web form', link: '/join' },
-  { icon: '🏥', text: 'Register organisation via web form', link: '/join' },
-  { icon: '🗺️', text: 'Live map of all active incidents', link: '/map' },
-  { icon: '📋', text: 'Browse & filter the incident feed', link: '/feed' },
-  { icon: '💳', text: 'Donate to specific incidents', link: '/feed' },
-]
+const TYPE_ICON: Record<string, string> = {
+  FIRE: '🔥', FLOOD: '🌊', COLLAPSE: '🏚', RTA: '🚗',
+  EXPLOSION: '💥', DROWNING: '🆘', HAZARD: '⚡',
+}
 
 export default function HomePage() {
   const { data: activeIncidents = [] } = useQuery<Incident[]>({
@@ -60,179 +52,111 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-bg font-sans">
-      {/* Nav */}
-      <nav className="bg-white border-b border-border px-6 py-4 flex items-center justify-between">
-        <span className="text-xl font-bold text-primary">🚨 Siren.ng</span>
-        <div className="flex gap-4 text-sm">
-          <Link to="/map" className="text-textBody hover:text-primary">Map</Link>
-          <Link to="/feed" className="text-textBody hover:text-primary">Feed</Link>
-          <Link to="/watch" className="text-textBody hover:text-primary">Watch</Link>
-          <Link to="/join" className="text-textBody hover:text-primary">Join</Link>
-          <Link to="/orgs" className="text-textBody hover:text-primary">Orgs</Link>
-          <Link to="/login" className="text-textBody hover:text-primary">Dashboard</Link>
-        </div>
-      </nav>
+      <Nav />
 
       {/* Hero */}
-      <section className="bg-primary text-white py-16 px-6 text-center">
-        <div className="max-w-2xl mx-auto">
-          <div className="inline-flex items-center gap-2 bg-white/20 rounded-full px-4 py-1 text-sm mb-4">
-            <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
-            {activeIncidents.length} active incident{activeIncidents.length !== 1 ? 's' : ''} right now
-          </div>
-          <h1 className="text-4xl font-bold mb-4">Lagos Emergency Coordination</h1>
-          <p className="text-white/90 text-lg mb-8">
-            Report emergencies, get community alerts, and coordinate response — via WhatsApp or the web app. No account required.
+      <section className="relative bg-gradient-to-br from-gray-900 via-slate-800 to-gray-900 text-white overflow-hidden">
+        <div className="absolute inset-0 opacity-5">
+          <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, white 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+        </div>
+        <div className="relative max-w-4xl mx-auto py-20 px-6 text-center">
+          {activeIncidents.length > 0 && (
+            <div className="inline-flex items-center gap-2 bg-white/15 border border-white/20 rounded-full px-4 py-1.5 text-sm mb-6">
+              <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+              <span className="font-medium">{activeIncidents.length} active emergency{activeIncidents.length !== 1 ? 's' : ''} in Lagos right now</span>
+            </div>
+          )}
+          <h1 className="text-4xl sm:text-5xl font-bold mb-4 leading-tight">
+            Protect the people<br />you love.
+          </h1>
+          <p className="text-white/85 text-lg mb-10 max-w-xl mx-auto leading-relaxed">
+            Get instant alerts when emergencies happen near your home, your children's school, or anywhere your family is.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <a
-              href={`https://wa.me/${WA}?text=Emergency`}
-              className="flex items-center justify-center gap-2 bg-white text-primary font-semibold px-8 py-3 rounded-lg hover:bg-gray-100 transition"
+            <Link
+              to="/watch"
+              className="flex items-center justify-center gap-2.5 bg-white text-primary font-bold px-8 py-3.5 rounded-xl hover:bg-gray-100 transition shadow-lg text-base"
             >
-              <span className="text-xl">📱</span>
-              <span>Use WhatsApp</span>
-            </a>
+              Watch a location
+            </Link>
             <Link
               to="/report"
-              className="flex items-center justify-center gap-2 border-2 border-white text-white font-semibold px-8 py-3 rounded-lg hover:bg-white/10 transition"
+              className="flex items-center justify-center gap-2.5 border-2 border-white/60 text-white font-semibold px-8 py-3.5 rounded-xl hover:bg-white/10 transition text-base"
             >
-              <span className="text-xl">💻</span>
-              <span>Use Web App</span>
+              Report an incident
             </Link>
           </div>
+          <p className="text-white/50 text-xs mt-6">No account required · AI-verified in ~90 seconds · Free forever</p>
         </div>
       </section>
 
-      {/* Dual channel — choose your way */}
-      <section className="py-14 px-6 max-w-5xl mx-auto">
-        <h2 className="text-2xl font-bold text-center mb-2 text-textPrimary">Two ways to use Siren.ng</h2>
-        <p className="text-center text-textBody mb-10">
-          Every feature is available on both channels. Use whichever works best for you.
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* WhatsApp channel */}
-          <div className="bg-white rounded-2xl border-2 border-green-200 p-8 flex flex-col">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-4xl">📱</span>
-              <div>
-                <h3 className="text-xl font-bold text-textPrimary">WhatsApp</h3>
-                <p className="text-sm text-textMuted">No internet browser needed</p>
-              </div>
-            </div>
-            <p className="text-textBody text-sm mb-6">
-              Works on any phone with WhatsApp — even on slow 2G. Just send a message and follow the guided prompts. No forms, no clicks.
-            </p>
-            <ul className="space-y-3 mb-8 flex-1">
-              {WA_FEATURES.map((f) => (
-                <li key={f.text} className="flex items-start gap-2 text-sm text-textBody">
-                  <span className="mt-0.5">{f.icon}</span>
-                  <span>{f.text}</span>
-                </li>
-              ))}
-            </ul>
-            <a
-              href={`https://wa.me/${WA}`}
-              className="block text-center bg-green-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-green-700 transition"
-            >
-              Open WhatsApp Chat →
-            </a>
-            <p className="text-center text-xs text-textMuted mt-3">
-              Save as contact: {WHATSAPP_NUMBER}
-            </p>
-          </div>
-
-          {/* Web App channel */}
-          <div className="bg-white rounded-2xl border-2 border-primary/30 p-8 flex flex-col">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-4xl">💻</span>
-              <div>
-                <h3 className="text-xl font-bold text-textPrimary">Web App</h3>
-                <p className="text-sm text-textMuted">Rich interface, maps & media</p>
-              </div>
-            </div>
-            <p className="text-textBody text-sm mb-6">
-              Full interactive experience in your browser. Pin your location on a map, attach photos, see live incident updates, donate, and manage everything in one place.
-            </p>
-            <ul className="space-y-3 mb-8 flex-1">
-              {WEB_FEATURES.map((f) => (
-                <li key={f.text} className="flex items-start gap-2 text-sm text-textBody">
-                  <span className="mt-0.5">{f.icon}</span>
-                  <Link to={f.link} className="hover:text-primary hover:underline">{f.text}</Link>
-                </li>
-              ))}
-            </ul>
-            <Link
-              to="/report"
-              className="block text-center bg-primary text-white font-semibold px-6 py-3 rounded-xl hover:bg-red-700 transition"
-            >
-              Report an Emergency →
-            </Link>
-            <p className="text-center text-xs text-textMuted mt-3">
-              No account needed for most features
-            </p>
-          </div>
-        </div>
-
-        {/* Quick WhatsApp commands reference */}
-        <div className="mt-8 bg-green-50 border border-green-200 rounded-xl p-6">
-          <h4 className="font-semibold text-textPrimary mb-3">WhatsApp quick commands</h4>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-            {[
-              ['Emergency', 'Report an incident'],
-              ['WATCH', 'Save a location for alerts'],
-              ['RESPONDER', 'Join as community responder'],
-              ['REGISTER ORG', 'Register your organisation'],
-              ['MY ALERTS', 'View your active subscriptions'],
-              ['VOUCH <id>', 'Confirm an incident is real'],
-            ].map(([cmd, desc]) => (
-              <a
-                key={cmd}
-                href={`https://wa.me/${WA}?text=${encodeURIComponent(cmd === 'Emergency' ? 'Emergency at [describe location]' : cmd)}`}
-                className="flex flex-col bg-white border border-green-200 rounded-lg p-3 hover:border-green-500 transition"
+      {/* Live active incidents bar */}
+      {activeIncidents.length > 0 && (
+        <section className="bg-red-50 border-b border-red-100 py-3 px-6">
+          <div className="max-w-6xl mx-auto flex items-center gap-3 overflow-x-auto scrollbar-hide">
+            <span className="text-xs font-bold text-red-600 uppercase tracking-wide shrink-0">Live</span>
+            {activeIncidents.slice(0, 6).map((inc) => (
+              <Link
+                key={inc.id}
+                to={`/track/${inc.id}`}
+                className={`shrink-0 flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full border ${SEVERITY_COLOR[inc.severity] || 'bg-white text-textBody border-border'}`}
               >
-                <code className="font-mono font-bold text-green-700 text-xs">{cmd}</code>
-                <span className="text-textMuted text-xs mt-0.5">{desc}</span>
-              </a>
+                <span>{TYPE_ICON[inc.incident_type] || '🚨'}</span>
+                <span>{inc.incident_type} · {inc.zone_name || 'Lagos'}</span>
+              </Link>
+            ))}
+            {activeIncidents.length > 6 && (
+              <Link to="/feed" className="shrink-0 text-xs text-primary font-semibold hover:underline">
+                +{activeIncidents.length - 6} more →
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* How it works — ICP focused */}
+      <section className="py-12 px-6 bg-white border-y border-border">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-2xl font-bold text-center text-textPrimary mb-2">How Siren protects your family</h2>
+          <p className="text-textBody text-center text-sm mb-10">Save locations once. We do the rest.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[
+              { step: '1', icon: '📍', title: "Save your family's locations", desc: 'Home, school, work, family compound — add any place you care about. No account needed.' },
+              { step: '2', icon: '🛡️', title: 'We watch for verified threats', desc: 'Our AI filters false reports 24/7. Only confirmed emergencies near your locations trigger an alert.' },
+              { step: '3', icon: '🔔', title: 'You get an instant alert', desc: 'Email or WhatsApp — your choice. Full details: what happened, where, who is responding.' },
+            ].map((item) => (
+              <div key={item.step} className="relative text-center p-6 bg-gray-50 rounded-2xl border border-border">
+                <div className="w-8 h-8 bg-primary text-white rounded-full flex items-center justify-center text-sm font-bold mx-auto mb-4">
+                  {item.step}
+                </div>
+                <div className="text-4xl mb-3">{item.icon}</div>
+                <h3 className="font-semibold text-textPrimary mb-2">{item.title}</h3>
+                <p className="text-textBody text-sm leading-relaxed">{item.desc}</p>
+              </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* How it works */}
-      <section className="py-10 px-6 max-w-4xl mx-auto border-t border-border">
-        <h2 className="text-2xl font-bold text-center mb-8 text-textPrimary">How it works</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[
-            { step: '1', icon: '📣', title: 'Report', desc: 'Send one WhatsApp message or fill the web form. No account, no friction.' },
-            { step: '2', icon: '🤖', title: 'AI Verifies in 90s', desc: 'Claude AI classifies and verifies the incident. Fraudulent reports are filtered out automatically.' },
-            { step: '3', icon: '🚀', title: 'Community Responds', desc: 'Nearest qualified responders and registered organisations receive GPS-guided alerts immediately.' },
-          ].map((item) => (
-            <div key={item.step} className="bg-white rounded-xl p-6 border border-border text-center">
-              <div className="text-4xl mb-3">{item.icon}</div>
-              <h3 className="font-semibold text-textPrimary mb-2">{item.title}</h3>
-              <p className="text-textBody text-sm">{item.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+
 
       {/* Lagos zones */}
-      <section className="py-8 px-6 max-w-4xl mx-auto">
-        <h2 className="text-xl font-bold mb-4 text-textPrimary">Lagos Zones</h2>
+      <section className="py-12 px-6 max-w-5xl mx-auto">
+        <h2 className="text-xl font-bold mb-5 text-textPrimary">Active Zones</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {ZONES.map((zone) => {
-            const count = activeIncidents.filter(
-              (i) => i.zone_name?.toLowerCase().includes(zone.toLowerCase())
-            ).length
+            const count = activeIncidents.filter(i => i.zone_name?.toLowerCase().includes(zone.toLowerCase())).length
             return (
               <Link
                 key={zone}
                 to={`/feed?zone_name=${encodeURIComponent(zone)}`}
-                className="bg-white border border-border rounded-lg p-3 hover:border-primary transition text-sm"
+                className="bg-white border border-border rounded-xl p-4 hover:border-primary hover:shadow-sm transition"
               >
-                <div className="font-medium text-textPrimary">{zone}</div>
-                {count > 0 && <div className="text-xs text-primary mt-1">{count} active</div>}
+                <div className="font-semibold text-textPrimary text-sm">{zone}</div>
+                {count > 0
+                  ? <div className="text-xs text-primary font-medium mt-1">{count} active 🔴</div>
+                  : <div className="text-xs text-green-600 mt-1">All clear ✓</div>
+                }
               </Link>
             )
           })}
@@ -241,21 +165,22 @@ export default function HomePage() {
 
       {/* Recently resolved */}
       {resolved.length > 0 && (
-        <section className="py-8 px-6 max-w-4xl mx-auto">
-          <h2 className="text-xl font-bold mb-4 text-textPrimary">Recently Resolved</h2>
-          <div className="space-y-3">
+        <section className="py-8 px-6 max-w-5xl mx-auto">
+          <h2 className="text-xl font-bold mb-5 text-textPrimary">Recently Resolved</h2>
+          <div className="space-y-2.5">
             {resolved.map((inc) => (
               <Link
                 key={inc.id}
                 to={`/track/${inc.id}`}
-                className="flex items-center justify-between bg-white border border-border rounded-lg p-4 hover:border-primary transition"
+                className="flex items-center gap-3 bg-white border border-border rounded-xl p-4 hover:border-primary hover:shadow-sm transition"
               >
-                <div>
-                  <span className="font-medium text-textPrimary">{inc.incident_type} — {inc.zone_name}</span>
-                  <div className="text-xs text-textMuted mt-0.5">
+                <span className="text-xl">{TYPE_ICON[inc.incident_type] || '🚨'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-textPrimary text-sm">{inc.incident_type} — {inc.zone_name}</p>
+                  <p className="text-xs text-textMuted mt-0.5">
                     {inc.resolved_at ? formatDistanceToNow(new Date(inc.resolved_at), { addSuffix: true }) : ''}
                     {inc.total_donations_naira > 0 && ` · ₦${inc.total_donations_naira.toLocaleString()} raised`}
-                  </div>
+                  </p>
                 </div>
                 <StatusBadge status={inc.status} />
               </Link>
@@ -264,56 +189,52 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Join CTAs — dual channel */}
-      <section className="py-12 px-6 bg-white border-t border-border">
+      {/* Join CTAs */}
+      <section className="py-14 px-6 bg-white border-t border-border">
         <div className="max-w-4xl mx-auto">
-          <h2 className="text-xl font-bold mb-6 text-textPrimary">Want to help respond?</h2>
+          <h2 className="text-2xl font-bold mb-8 text-textPrimary text-center">Want to help respond?</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="border border-border rounded-xl p-6">
+            <div className="border border-border rounded-2xl p-6">
               <div className="text-3xl mb-3">🩺</div>
               <h3 className="font-bold text-lg mb-2">Become a Community Responder</h3>
-              <p className="text-textBody text-sm mb-4">
-                Nurse, doctor, engineer, or trained in first aid? Register to receive alerts when incidents happen near you.
+              <p className="text-textBody text-sm mb-4 leading-relaxed">
+                Nurse, doctor, engineer, or trained in first aid? Register to receive GPS-guided alerts when emergencies happen near you.
               </p>
-              <div className="flex gap-2">
-                <a
-                  href={`https://wa.me/${WA}?text=RESPONDER`}
-                  className="flex-1 text-center border border-green-300 text-green-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-50 transition"
-                >
-                  📱 Via WhatsApp
-                </a>
-                <Link
-                  to="/join"
-                  className="flex-1 text-center bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 transition"
-                >
-                  💻 Via Web Form
-                </Link>
-              </div>
+              <Link to="/join" className="block text-center bg-primary text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-red-700 transition">
+                Register as Responder →
+              </Link>
             </div>
-            <div className="border border-border rounded-xl p-6">
+            <div className="border border-border rounded-2xl p-6">
               <div className="text-3xl mb-3">🏥</div>
               <h3 className="font-bold text-lg mb-2">Register Your Organisation</h3>
-              <p className="text-textBody text-sm mb-4">
-                Hospitals, ambulance services, fire safety companies — get notified when incidents happen near you.
+              <p className="text-textBody text-sm mb-4 leading-relaxed">
+                Hospitals, ambulance services, fire safety companies — get notified when incidents happen within your service radius.
               </p>
-              <div className="flex gap-2">
-                <a
-                  href={`https://wa.me/${WA}?text=REGISTER+ORG`}
-                  className="flex-1 text-center border border-green-300 text-green-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-50 transition"
-                >
-                  📱 Via WhatsApp
-                </a>
-                <Link
-                  to="/join"
-                  className="flex-1 text-center bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 transition"
-                >
-                  💻 Via Web Form
-                </Link>
-              </div>
+              <Link to="/join" className="block text-center bg-primary text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-red-700 transition">
+                Register Organisation →
+              </Link>
             </div>
           </div>
         </div>
       </section>
+
+      {/* Footer */}
+      <footer className="bg-gray-900 text-white py-10 px-6">
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
+          <div className="flex items-center gap-2 font-bold text-lg">
+            <span>🚨</span> Siren.ng
+          </div>
+          <div className="flex flex-wrap justify-center gap-5 text-gray-400">
+            <Link to="/map" className="hover:text-white transition">Live Map</Link>
+            <Link to="/feed" className="hover:text-white transition">Feed</Link>
+            <Link to="/connect" className="hover:text-white transition">Connect WhatsApp</Link>
+            <Link to="/watch" className="hover:text-white transition">Watch</Link>
+            <Link to="/join" className="hover:text-white transition">Join</Link>
+            <Link to="/login" className="hover:text-white transition">Admin</Link>
+          </div>
+          <p className="text-gray-500 text-xs text-center">For Lagos. By the community.</p>
+        </div>
+      </footer>
     </div>
   )
 }

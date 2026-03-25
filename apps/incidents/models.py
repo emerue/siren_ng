@@ -33,11 +33,10 @@ class Incident(models.Model):
     id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     source        = models.CharField(max_length=20,
                       choices=[('WHATSAPP', 'WhatsApp'), ('WEB', 'Web Portal')])
-    external_id   = models.CharField(max_length=200, blank=True)  # Twilio SID
-    reporter_hash = models.CharField(max_length=64)               # SHA256 of phone
-    reporter_phone = models.CharField(max_length=20, blank=True)  # Needed to send replies
+    external_id   = models.CharField(max_length=200, blank=True)
+    reporter_hash = models.CharField(max_length=64)
+    reporter_phone = models.CharField(max_length=20, blank=True)
 
-    # Classification
     incident_type = models.CharField(max_length=20, choices=IncidentType.choices, blank=True)
     description   = models.TextField()
     severity      = models.CharField(max_length=10, choices=IncidentSeverity.choices,
@@ -45,32 +44,25 @@ class Incident(models.Model):
     status        = models.CharField(max_length=20, choices=IncidentStatus.choices,
                       default='DETECTED')
 
-    # Location — two plain FloatFields, NO GeoDjango
     location_lat  = models.FloatField(null=True, blank=True)
     location_lng  = models.FloatField(null=True, blank=True)
     address_text  = models.CharField(max_length=500, blank=True)
     zone_name     = models.CharField(max_length=100, blank=True)
 
-    # Media
     media_urls    = models.JSONField(default=list)
 
-    # AI verification
     ai_confidence   = models.FloatField(default=0.0)
     fraud_score     = models.FloatField(default=0.0)
     ai_raw_response = models.JSONField(default=dict)
 
-    # Community verification
     vouch_count     = models.PositiveIntegerField(default=0)
     vouch_threshold = models.PositiveIntegerField(default=3)
 
-    # Donations summary (updated whenever a donation is made)
-    total_donations_kobo = models.PositiveIntegerField(default=0)  # Stored in kobo
+    total_donations_kobo = models.PositiveIntegerField(default=0)
     donation_count       = models.PositiveIntegerField(default=0)
 
-    # v5 NEW: set True by Claude when HAZARD incident involves wires/poles/transformers
     is_infrastructure = models.BooleanField(default=False)
 
-    # Assigned agency
     agency_assigned = models.ForeignKey(
         'organisations.Organisation', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='assigned_incidents'
@@ -102,7 +94,7 @@ class ResponseLog(models.Model):
                     related_name='response_logs')
     from_status = models.CharField(max_length=20, blank=True)
     to_status   = models.CharField(max_length=20)
-    actor       = models.CharField(max_length=200)  # 'AI', 'community', 'agency', 'admin'
+    actor       = models.CharField(max_length=200)
     note        = models.TextField(blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
 
@@ -114,7 +106,7 @@ class VouchRecord(models.Model):
     """One vouch per session per incident. unique_together prevents duplicates."""
     incident      = models.ForeignKey(Incident, on_delete=models.CASCADE,
                       related_name='vouches')
-    session_hash  = models.CharField(max_length=64)  # SHA256(IP + UserAgent + incident_id)
+    session_hash  = models.CharField(max_length=64)
     voucher_lat   = models.FloatField(null=True, blank=True)
     voucher_lng   = models.FloatField(null=True, blank=True)
     distance_km   = models.FloatField(null=True, blank=True)
@@ -126,3 +118,20 @@ class VouchRecord(models.Model):
 
     class Meta:
         unique_together = ('incident', 'session_hash')
+
+
+class IncidentMedia(models.Model):
+    """Structured media record — image or video attached to an incident."""
+    MEDIA_TYPE_CHOICES = [('image', 'Image'), ('video', 'Video')]
+
+    incident         = models.ForeignKey(Incident, on_delete=models.CASCADE,
+                         related_name='media')
+    media_type       = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES)
+    public_url       = models.URLField(max_length=500)
+    storage_path     = models.CharField(max_length=500)
+    file_size        = models.PositiveIntegerField()
+    uploaded_by_hash = models.CharField(max_length=64, blank=True)
+    upload_timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['upload_timestamp']

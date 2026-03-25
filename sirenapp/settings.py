@@ -25,8 +25,6 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "corsheaders",
     "channels",
-    "cloudinary",
-    "cloudinary_storage",
     "django_celery_beat",
     # Siren apps
     "apps.incidents",
@@ -145,12 +143,14 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
 
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
-CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": config("CLOUDINARY_CLOUD_NAME", default=""),
-    "API_KEY":    config("CLOUDINARY_API_KEY", default=""),
-    "API_SECRET": config("CLOUDINARY_API_SECRET", default=""),
-}
+# Supabase Storage — v6
+SUPABASE_URL            = config('SUPABASE_URL', default='')
+SUPABASE_SERVICE_KEY    = config('SUPABASE_SERVICE_KEY', default='')
+SUPABASE_STORAGE_BUCKET = config('SUPABASE_STORAGE_BUCKET', default='incident-media')
+MAX_IMAGE_SIZE_MB        = 5
+MAX_VIDEO_SIZE_MB        = 50
+ALLOWED_IMAGE_TYPES      = ['image/jpeg', 'image/png', 'image/webp']
+ALLOWED_VIDEO_TYPES      = ['video/mp4', 'video/quicktime']
 
 ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="")
 ANTHROPIC_MODEL   = config("ANTHROPIC_MODEL", default="claude-sonnet-4-6")

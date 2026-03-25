@@ -21,6 +21,7 @@ import DashboardSubscribers from './pages/DashboardSubscribers'
 import DashboardDonations from './pages/DashboardDonations'
 import DashboardIncidentDetail from './pages/DashboardIncidentDetail'
 import MyImpactPage from './pages/MyImpactPage'
+import ConnectPage from './pages/ConnectPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -43,6 +44,8 @@ export default function App() {
           <Route path="/report" element={<ReportPage />} />
           <Route path="/join" element={<JoinPage />} />
           <Route path="/watch" element={<WatchPage />} />
+          <Route path="/connect" element={<ConnectPage />} />
+          <Route path="/whatsapp" element={<Navigate to="/connect" replace />} />
           <Route path="/donate/success" element={<DonateSuccessPage />} />
           <Route path="/donate/:id" element={<DonatePage />} />
           <Route path="/organisations" element={<OrgsPage />} />

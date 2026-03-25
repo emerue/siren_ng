@@ -20,6 +20,14 @@ export interface VouchRecord {
   created_at: string
 }
 
+export interface IncidentMedia {
+  id: number
+  media_type: 'image' | 'video'
+  public_url: string
+  file_size: number
+  upload_timestamp: string
+}
+
 export interface Incident {
   id: string
   source: 'WHATSAPP' | 'WEB'
@@ -32,6 +40,7 @@ export interface Incident {
   address_text: string
   zone_name: string
   media_urls: string[]
+  media?: IncidentMedia[]
   ai_confidence: number
   fraud_score: number
   ai_raw_response: Record<string, unknown>

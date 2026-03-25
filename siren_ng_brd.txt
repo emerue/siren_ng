@@ -2647,3 +2647,22 @@ Siren.ng BRD v5 — March 2026 — In Deployment
 Python 3.13 + Django 5.1 + psycopg3 + Supabase PostgreSQL + React + WhatsApp + Claude AI + Paystack
 Phases 1–6 complete. Phase 7 (Railway deployment) in progress.
 ================================================================================
+
+
+
+
+
+
+ This means:                      - No Redis needed — Celery
+  tasks run inline, channels use   in-memory, cache uses the      
+  database                       
+  - WhatsApp messages still send
+  — just synchronously instead of
+   via a queue                     - WebSockets work — but only
+  within a single server instance
+   (fine for Railway's single      dyno)                          
+                                 
+  The only trade-off is that if  
+  you later scale to multiple      instances, you'll want Redis
+  back. For now it will work     
+  fine.      

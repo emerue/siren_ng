@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Popup, Marker, Polyline } from 'react-leaflet'
-import { Link } from 'react-router-dom'
+import Nav from '../components/Nav'
 import L from 'leaflet'
 import { useQuery } from '@tanstack/react-query'
 import { getActiveIncidents, getOrganisationsMap, getSubscriptions } from '../api'
@@ -60,9 +60,9 @@ export default function MapPage() {
 
   return (
     <div className="h-screen flex flex-col font-sans">
+      <Nav />
       {/* Filter bar */}
       <div className="bg-white border-b border-border px-4 py-2 flex gap-2 overflow-x-auto z-10">
-        <Link to="/" className="text-primary font-bold mr-2 whitespace-nowrap">🚨 Siren</Link>
         {INCIDENT_TYPES.map((t) => (
           <button
             key={t}

@@ -1,0 +1,2852 @@
+================================================================================
+SIREN.NG — FULL BUSINESS REQUIREMENTS DOCUMENT
+Version 6 — Guardian & Commute Shield + Media Upload + WhatsApp Integration Page
+March 2026
+Stack: Python 3.13, Django 5.1, Supabase PostgreSQL, React, WhatsApp, Claude AI, Paystack
+Phases 1–7: COMPLETE.
+================================================================================
+
+READ THIS BEFORE WRITING ANY CODE.
+This document is written for an AI coding assistant (Claude Code).
+Build in the exact phase order specified. Each phase must be fully working
+before starting the next. Do not skip ahead.
+
+If you are applying v6 updates to an existing v5 MVP, skip to SECTION 20.
+
+================================================================================
+WHAT CHANGED IN v6
+================================================================================
+
+Section 1.1  — Core Principles updated. Web is primary. WhatsApp is a channel.
+Section 1.2  — Ideal Customer Profile formally added.
+Section 7.1  — IncidentMedia model added. media_urls JSONField deprecated.
+Section 14   — All frontend pages redesigned around ICP. WhatsApp CTAs removed
+               from all pages except /connect.
+Section 17   — NEW: Media Upload Requirements (functional, non-functional, data,
+               API, storage, env vars).
+Section 18   — NEW: WhatsApp Integration Hub page spec (/connect).
+               All WhatsApp flows documented here only.
+Section 19   — Critical notes updated with media/storage rules.
+Section 20   — NEW: v6 update instructions for existing v5 MVP.
+Phase 7      — Status updated to COMPLETE.
+
+Everything in Sections 2–16 from v5 is unchanged unless explicitly noted.
+
+================================================================================
+QUICK REFERENCE
+================================================================================
+
+Project name (Django):  sirenapp
+Python version:         3.13
+Database:               Supabase PostgreSQL (plain engine, no GeoDjango)
+DB adapter:             psycopg[binary]>=3.1 (psycopg3 — NOT psycopg2)
+AI verification:        Anthropic Claude (claude-sonnet-4-6)
+WhatsApp:               Twilio WhatsApp Business API
+Payments:               Paystack
+Map tiles:              OpenStreetMap (free, no API key)
+Task queue:             Celery + Redis (Railway)
+Real-time:              Django Channels + WebSocket
+Spatial queries:        Raw Haversine SQL in utils/distance.py
+Deployment:             Railway (nixpacks, GitHub-connected) — COMPLETE
+NO GeoDjango. NO PointField. NO GDAL. NO PolygonField. Ever.
+NO psycopg2. Use psycopg[binary]>=3.1 only.
+
+================================================================================
+SECTION 1 — WHAT WE ARE BUILDING
+================================================================================
+
+Siren.ng is a community emergency coordination platform for Lagos, Nigeria.
+
+THE PROBLEM (grounded in 2025 data):
+Lagos State Command and Control Centre (LSCCC) handled 12,483 emergency
+incidents in 2025. LASEMA recorded 1,156 incidents resulting in 173 deaths.
+The top three categories by frequency:
+
+  1. Road Traffic (RTA/HAZARD): 2,504 accident calls + 394 road crashes +
+     249 tanker incidents. Daily downed power lines, fallen poles, and wire
+     hazards force single-lane traffic and cause chain accidents. This is
+     the #1 category by volume and daily life impact.
+
+  2. Fire: 2,165 fire-related calls. Lagos Fire Service recorded 1,685
+     outbreaks causing 133 deaths and 19.72 billion naira in property losses.
+     Electrical faults (transformers, downed wires) are a leading cause.
+
+  3. Medical Emergencies: 2,397 cases. Most linked to road injuries or
+     flooding-related illness. Alimosho and Eti-Osa LGAs top incident counts.
+
+53% of emergency calls still go unanswered. Average response delay kills people.
+There is no single coordination point connecting willing helpers with people who
+need them in real time.
+
+THE SOLUTION:
+One platform. Report an emergency from the web or WhatsApp. Within 90 seconds
+Claude AI verifies it, the nearest qualified community responder gets GPS
+directions to the scene, the closest clinic is alerted, and the reporter gets a
+live tracking link. The web app is the full experience. WhatsApp is an optional
+entry and notification channel.
+
+Beyond emergency response, Siren also:
+- Lets families save locations (home, child's school, land, elderly parent's
+  compound) and get alerts when incidents happen nearby — GUARDIAN MODE
+- Lets daily commuters save their Home + Office route and get peak-hour
+  reroute alerts when incidents block their corridor — COMMUTE SHIELD
+- Runs a live community resource board on each active incident
+- Accepts donations for victims, responders, and the platform via Paystack
+- Lets community members vouch for incidents to help verify them
+- Allows media (photos/video) to be attached to incident reports
+
+CORE AUDIENCE (locked):
+  1. Lagos families & property owners — emotional loyalty
+     "What if flood hits Timi's school while I'm in traffic?"
+  2. Daily 9-5 commuters — daily habit + virality
+     "That downed wire just cost me 3 hours. Why didn't I know?"
+
+These two groups cover 80%+ of Lagos adults and share one need: predictable
+control in a city that feels uncontrollable. Siren gives them that.
+
+--------------------------------------------------------------------------------
+1.1 CORE PRINCIPLES — NEVER BREAK THESE
+--------------------------------------------------------------------------------
+
+1. Web is the primary experience.
+   The web app is the full, rich, trust-building product. It works completely
+   without WhatsApp. Location monitoring, incident tracking, resource boards,
+   donations — everything runs on the web. WhatsApp is an optional second
+   channel for notifications and quick reporting, not a prerequisite.
+
+2. Location monitoring is the hero feature.
+   For our ideal customer, watching over family locations is the reason to
+   sign up. Emergency reporting is important but secondary. Every homepage
+   and onboarding flow leads with: save a location, get protected.
+
+3. Zero friction to start. Full depth to stay.
+   Save a first location in under 60 seconds with no account. As trust builds,
+   add more locations, connect WhatsApp, and become a long-term user. The depth
+   is always available — never forced upfront.
+
+4. AI filters before humans see anything.
+   Responders only see VERIFIED incidents. The feed stays trusted. This
+   directly protects our ideal customer from false alarms that break trust.
+
+5. Every incident closes visibly.
+   The reporter must see the loop close — what happened, who helped, how fast.
+   Subscribers near the incident also see the resolution. This builds the
+   habitual checking behaviour we need.
+
+6. WhatsApp is a channel, not a dependency.
+   WhatsApp integration is documented on a dedicated page (/connect). It is
+   an enhancement for power users. The platform works fully without it. We do
+   not scatter WhatsApp CTAs across every page.
+
+7. Government is optional.
+   Platform works fully without LASEMA.
+
+8. No forced account creation for public users.
+   Subscribers identified by phone number or email. Reporters, vouchers,
+   resource contributors, and donors use session tokens. JWT login is only
+   for agency operators and platform admin.
+
+9. Guardian Mode and Commute Shield are passive.
+   Once saved, they work silently in the background. The user does nothing.
+   Siren does the work.
+
+--------------------------------------------------------------------------------
+1.2 IDEAL CUSTOMER PROFILE
+--------------------------------------------------------------------------------
+
+Every design decision must pass this test: does it work for this person?
+
+WHO:
+  A Lagos mother, 28-50 years old. Has children at school, siblings or parents
+  at different addresses across the city, and a home she needs to protect. May
+  or may not be tech-savvy. Checks WhatsApp every 30 minutes. Has strong
+  anxiety about proximity threats she cannot see.
+
+HER JOB:
+  Know what is happening near her family's locations before it reaches them.
+  Act immediately if something is wrong.
+
+PRIMARY ACTION:
+  Save locations she cares about (home, child's school, sibling's area) and
+  receive instant alerts when verified incidents occur nearby.
+
+SECONDARY ACTION:
+  Report an emergency she witnesses. Donate to affected families. Contribute
+  resources to active incidents.
+
+WHAT BREAKS HER TRUST:
+  False alarms. Unverified rumours. Friction before she can save a location.
+  Anything that feels like another social media feed instead of a trusted
+  safety tool.
+
+--------------------------------------------------------------------------------
+1.3 THE SEVEN INCIDENT TYPES — ONLY THESE ARE ACCEPTED
+--------------------------------------------------------------------------------
+
+Code        What qualifies
+----------- ----------------------------------------------------------------
+FIRE        Structure fire, vehicle fire, gas explosion.
+            NOT: trash fires, small cooking fires with no spread risk.
+FLOOD       Homes or roads submerged, people trapped by rising water.
+            NOT: puddles or mild waterlogging.
+COLLAPSE    Full or partial building collapse, imminent collapse with people.
+            NOT: cracks or cosmetic damage.
+RTA         Road crash with injuries or trapped victims.
+            NOT: minor fender benders with no injuries.
+EXPLOSION   Gas tanker, pipeline, or industrial explosion with radius risk.
+DROWNING    Person unable to self-rescue in water, boat capsize, flood rescue.
+HAZARD      Live downed power lines, fallen transformer, collapsed
+            infrastructure threatening life or blocking a major route.
+            Most common daily type in Lagos. Triggers Guardian + Commute Shield.
+
+Everything outside these seven is rejected at AI verification with a message
+pointing the reporter to the right resource.
+
+--------------------------------------------------------------------------------
+1.4 USER TYPES
+--------------------------------------------------------------------------------
+
+User Type               Primary Channel          What They Get
+----------------------- ------------------------ --------------------------------
+Location Subscriber     Web or WhatsApp          Saved locations + instant alerts.
+(ICP)                                            Guardian Mode + Commute Shield.
+Reporter                Web or WhatsApp          AI confirmation, status updates,
+                                                 loop closure message
+Community Responder     WhatsApp notifications   Verified incident alerts matched
+                                                 to skills and location
+Organisation            WhatsApp notifications   Incident routing, verified
+(clinic, ambulance)                              partner badge
+Resource Contributor    Web                      Claims items on resource board
+Donor                   Web                      Donates via Paystack, 3 funds
+Voucher                 Web or WhatsApp reaction One-tap incident verification
+Agency Operator         Web dashboard (JWT)      Full incident queue + dispatch
+Platform Admin          Django Admin             Full system management
+
+================================================================================
+SECTION 2 — TECHNOLOGY STACK
+================================================================================
+
+--------------------------------------------------------------------------------
+2.1 BACKEND PACKAGES (requirements.txt)
+--------------------------------------------------------------------------------
+
+setuptools<82
+django==5.1
+djangorestframework==3.15
+psycopg[binary]>=3.1
+dj-database-url==2.2
+python-decouple==3.8
+djangorestframework-simplejwt==5.3
+django-cors-headers==4.4
+whitenoise==6.7
+celery==5.4
+redis==5.0
+channels==4.1
+channels-redis==4.2
+daphne==4.1
+anthropic
+twilio==9.3
+supabase
+Pillow
+python-magic
+django-celery-beat==2.7
+requests
+gunicorn==22.0.0
+pytz
+groq
+
+NOTE: psycopg2-binary is REMOVED. Use psycopg[binary]>=3.1 only.
+NOTE: supabase, Pillow, python-magic are NEW in v6 for media upload.
+
+--------------------------------------------------------------------------------
+2.2 FRONTEND PACKAGES (package.json)
+--------------------------------------------------------------------------------
+
+react@19
+vite@6
+typescript@5
+tailwindcss@3.4
+react-leaflet@4
+leaflet@1.9
+recharts@2
+axios@1.7
+@tanstack/react-query@5
+zustand@4
+react-router-dom@6
+lucide-react@0.383
+date-fns@3
+clsx@2
+
+--------------------------------------------------------------------------------
+2.3 INFRASTRUCTURE
+--------------------------------------------------------------------------------
+
+Service             Purpose
+------------------- -----------------------------------------------------------
+Supabase            PostgreSQL + Storage bucket for incident media.
+                    Use Direct Connection URI (port 5432). NEVER the pooler.
+Railway (Redis)     Redis for Celery task queue and Django Channels layer.
+Railway (Deploy)    Hosts Django in production. COMPLETE.
+Twilio              WhatsApp Business API.
+Paystack            Donations with sub-account splitting.
+OpenStreetMap       Free map tiles. No API key needed.
+
+================================================================================
+SECTION 3 — PROJECT STRUCTURE
+================================================================================
+
+siren_ng/
+├── sirenapp/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── urls.py
+│   ├── asgi.py
+│   ├── wsgi.py
+│   └── celery.py
+│
+├── apps/
+│   ├── __init__.py
+│   ├── incidents/                <- PHASE 1
+│   │   ├── __init__.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   ├── urls.py
+│   │   ├── consumers.py
+│   │   ├── tasks.py
+│   │   └── admin.py
+│   │
+│   ├── whatsapp/                 <- PHASE 2
+│   │   ├── __init__.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── views.py
+│   │   ├── handlers.py
+│   │   ├── templates.py
+│   │   ├── tasks.py
+│   │   └── urls.py
+│   │
+│   ├── responders/               <- PHASE 3
+│   ├── organisations/            <- PHASE 3
+│   ├── resources/                <- PHASE 4
+│   ├── subscriptions/            <- PHASE 5
+│   └── analytics/                <- PHASE 6
+│
+├── services/
+│   ├── __init__.py
+│   └── media_service.py          <- NEW v6: Supabase Storage upload/delete
+│
+├── utils/
+│   ├── __init__.py
+│   └── distance.py
+│
+├── frontend/
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── pages/
+│       ├── components/
+│       ├── hooks/
+│       ├── store/
+│       ├── api/
+│       └── types/index.ts
+│
+├── .env
+├── .gitignore
+├── requirements.txt
+└── manage.py
+
+================================================================================
+SECTION 4 — SETTINGS FILE (sirenapp/settings.py)
+================================================================================
+
+from pathlib import Path
+from decouple import config
+import dj_database_url
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+SECRET_KEY = config('SECRET_KEY')
+DEBUG = config('DEBUG', default=False, cast=bool)
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
+
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'corsheaders',
+    'channels',
+    'apps.incidents',
+    'apps.whatsapp',
+    'apps.responders',
+    'apps.organisations',
+    'apps.resources',
+    'apps.subscriptions',
+    'apps.analytics',
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'sirenapp.urls'
+ASGI_APPLICATION = 'sirenapp.asgi.application'
+
+TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates',
+    'DIRS': [], 'APP_DIRS': True, 'OPTIONS': {'context_processors': [
+        'django.template.context_processors.debug',
+        'django.template.context_processors.request',
+        'django.contrib.auth.context_processors.auth',
+        'django.contrib.messages.context_processors.messages',
+    ]},
+}]
+
+DATABASES = {
+    'default': dj_database_url.parse(
+        config('DATABASE_URL'),
+        engine='django.db.backends.postgresql'
+    )
+}
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {'hosts': [config('REDIS_URL', default='redis://localhost:6379/0')]},
+    }
+}
+
+CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_TASK_ALWAYS_EAGER = config('CELERY_ALWAYS_EAGER', default=False, cast=bool)
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+    ),
+}
+
+CORS_ALLOWED_ORIGINS = config(
+    'CORS_ALLOWED_ORIGINS',
+    default='http://localhost:5173,http://localhost:3000'
+).split(',')
+
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+ANTHROPIC_API_KEY = config('ANTHROPIC_API_KEY', default='')
+ANTHROPIC_MODEL   = config('ANTHROPIC_MODEL', default='claude-sonnet-4-6')
+
+TWILIO_ACCOUNT_SID     = config('TWILIO_ACCOUNT_SID', default='')
+TWILIO_AUTH_TOKEN      = config('TWILIO_AUTH_TOKEN', default='')
+TWILIO_WHATSAPP_NUMBER = config('TWILIO_WHATSAPP_NUMBER', default='')
+
+PAYSTACK_SECRET_KEY       = config('PAYSTACK_SECRET_KEY', default='')
+PAYSTACK_PUBLIC_KEY       = config('PAYSTACK_PUBLIC_KEY', default='')
+SIREN_PAYSTACK_SUBACCOUNT = config('SIREN_PAYSTACK_SUBACCOUNT', default='')
+
+# Supabase Storage — v6 NEW
+SUPABASE_URL            = config('SUPABASE_URL', default='')
+SUPABASE_SERVICE_KEY    = config('SUPABASE_SERVICE_KEY', default='')
+SUPABASE_STORAGE_BUCKET = config('SUPABASE_STORAGE_BUCKET', default='incident-media')
+MAX_IMAGE_SIZE_MB        = 5
+MAX_VIDEO_SIZE_MB        = 50
+ALLOWED_IMAGE_TYPES      = ['image/jpeg', 'image/png', 'image/webp']
+ALLOWED_VIDEO_TYPES      = ['video/mp4', 'video/quicktime']
+
+from celery.schedules import crontab
+CELERY_BEAT_SCHEDULE = {
+    'daily-safety-score': {
+        'task': 'apps.subscriptions.tasks.daily_safety_score_update',
+        'schedule': crontab(hour=6, minute=0),
+    },
+    'morning-commute-briefing': {
+        'task': 'apps.subscriptions.tasks.send_commute_briefing',
+        'schedule': crontab(hour=6, minute=30),
+    },
+    'evening-commute-briefing': {
+        'task': 'apps.subscriptions.tasks.send_commute_briefing',
+        'schedule': crontab(hour=16, minute=30),
+    },
+    'verifying-escalation': {
+        'task': 'apps.incidents.tasks.check_verifying_escalation',
+        'schedule': crontab(minute='*/5'),
+    },
+    'donation-cleanup': {
+        'task': 'apps.resources.tasks.donation_pending_cleanup',
+        'schedule': crontab(hour=9, minute=0),
+    },
+}
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+LANGUAGE_CODE = 'en-us'
+TIME_ZONE = 'Africa/Lagos'
+USE_TZ = True
+
+================================================================================
+SECTION 5 — ENVIRONMENT VARIABLES (.env)
+================================================================================
+
+SECRET_KEY=any-long-random-string-minimum-50-characters
+DEBUG=False
+ALLOWED_HOSTS=your-railway-domain.railway.app,localhost,127.0.0.1
+CELERY_ALWAYS_EAGER=False
+CORS_ALLOWED_ORIGINS=https://your-railway-domain.railway.app,http://localhost:5173
+
+# Supabase — Settings > Database > Direct Connection URI (port 5432)
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+
+# Railway Redis
+REDIS_URL=redis://default:[PASSWORD]@[HOST]:[PORT]
+
+# Anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4-6
+
+# Twilio
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_WHATSAPP_NUMBER=whatsapp:+234XXXXXXXXXX
+
+# Paystack
+PAYSTACK_SECRET_KEY=sk_live_...
+PAYSTACK_PUBLIC_KEY=pk_live_...
+SIREN_PAYSTACK_SUBACCOUNT=ACCT_...
+
+# Supabase Storage — v6 NEW
+SUPABASE_URL=https://[REF].supabase.co
+SUPABASE_SERVICE_KEY=your_service_role_key   # NOT the anon key
+SUPABASE_STORAGE_BUCKET=incident-media
+
+# .gitignore
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+db.sqlite3
+staticfiles/
+media/
+node_modules/
+dist/
+
+================================================================================
+SECTION 6 — HAVERSINE DISTANCE UTILITY (utils/distance.py)
+================================================================================
+
+Build this before any app. Every spatial query goes through this function.
+CRITICAL: Uses HAVING not WHERE. Do not change this.
+
+from django.db import connection
+
+
+def haversine_query(table, lat_field, lng_field, ref_lat, ref_lng,
+                    radius_km, extra_filters='', extra_params=None, limit=10):
+    base_params = [ref_lat, ref_lng, ref_lat]
+    filter_params = extra_params or []
+    params = base_params + filter_params + [radius_km]
+
+    sql = f"""
+        SELECT *,
+          (6371 * acos(
+            LEAST(1.0,
+              cos(radians(%s)) * cos(radians({lat_field})) *
+              cos(radians({lng_field}) - radians(%s)) +
+              sin(radians(%s)) * sin(radians({lat_field}))
+            )
+          )) AS distance_km
+        FROM {table}
+        WHERE (1=1) {extra_filters}
+        HAVING distance_km <= %s
+        ORDER BY distance_km ASC
+        LIMIT {limit}
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        columns = [col[0] for col in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def point_to_line_distance(point_lat, point_lng, a_lat, a_lng, b_lat, b_lng):
+    """
+    Returns approximate distance in km from a point to the line segment A-B.
+    Used by Commute Shield to check if an incident is on a commuter's route.
+    Flat-earth approximation — accurate enough for Lagos corridor checks.
+    """
+    import math
+
+    def to_rad(d): return d * math.pi / 180
+    lat0 = (a_lat + b_lat) / 2
+    dx = math.cos(to_rad(lat0))
+
+    ax, ay = a_lng * dx, a_lat
+    bx, by = b_lng * dx, b_lat
+    px, py = point_lng * dx, point_lat
+
+    abx, aby = bx - ax, by - ay
+    ab_len_sq = abx * abx + aby * aby
+
+    if ab_len_sq == 0:
+        return math.sqrt((px - ax) ** 2 + (py - ay) ** 2) * 111.0
+
+    t = max(0, min(1, ((px - ax) * abx + (py - ay) * aby) / ab_len_sq))
+    closest_x = ax + t * abx
+    closest_y = ay + t * aby
+
+    dist_deg = math.sqrt((px - closest_x) ** 2 + (py - closest_y) ** 2)
+    return dist_deg * 111.0
+
+================================================================================
+SECTION 7 — DATA MODELS
+================================================================================
+
+CRITICAL: Every models.py uses: from django.db import models
+NEVER: from django.contrib.gis.db import models
+All location data = two FloatFields. No PointField. No PolygonField.
+
+--------------------------------------------------------------------------------
+7.1 INCIDENTS APP MODELS (apps/incidents/models.py)
+--------------------------------------------------------------------------------
+
+import uuid
+from django.db import models
+
+
+class IncidentType(models.TextChoices):
+    FIRE      = 'FIRE',      'Fire Outbreak'
+    FLOOD     = 'FLOOD',     'Flooding'
+    COLLAPSE  = 'COLLAPSE',  'Building/Structural Collapse'
+    RTA       = 'RTA',       'Road Traffic Accident'
+    EXPLOSION = 'EXPLOSION', 'Gas/Chemical Explosion'
+    DROWNING  = 'DROWNING',  'Drowning/Water Emergency'
+    HAZARD    = 'HAZARD',    'Structural/Electrical Hazard'
+
+
+class IncidentSeverity(models.TextChoices):
+    LOW      = 'LOW',      'Low'
+    MEDIUM   = 'MEDIUM',   'Medium'
+    HIGH     = 'HIGH',     'High'
+    CRITICAL = 'CRITICAL', 'Critical'
+
+
+class IncidentStatus(models.TextChoices):
+    DETECTED        = 'DETECTED',        'Detected'
+    VERIFYING       = 'VERIFYING',       'Verifying'
+    VERIFIED        = 'VERIFIED',        'Verified'
+    RESPONDING      = 'RESPONDING',      'Community Responding'
+    AGENCY_NOTIFIED = 'AGENCY_NOTIFIED', 'Agency Notified'
+    RESOLVED        = 'RESOLVED',        'Resolved'
+    REJECTED        = 'REJECTED',        'Rejected'
+
+
+class Incident(models.Model):
+    id             = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source         = models.CharField(max_length=20,
+                       choices=[('WHATSAPP', 'WhatsApp'), ('WEB', 'Web Portal')])
+    external_id    = models.CharField(max_length=200, blank=True)
+    reporter_hash  = models.CharField(max_length=64)
+    reporter_phone = models.CharField(max_length=20, blank=True)
+
+    incident_type = models.CharField(max_length=20, choices=IncidentType.choices, blank=True)
+    description   = models.TextField()
+    severity      = models.CharField(max_length=10, choices=IncidentSeverity.choices,
+                      default='MEDIUM')
+    status        = models.CharField(max_length=20, choices=IncidentStatus.choices,
+                      default='DETECTED')
+
+    location_lat = models.FloatField(null=True, blank=True)
+    location_lng = models.FloatField(null=True, blank=True)
+    address_text = models.CharField(max_length=500, blank=True)
+    zone_name    = models.CharField(max_length=100, blank=True)
+
+    # DEPRECATED in v6 — use IncidentMedia model. Kept for backwards compat.
+    media_urls = models.JSONField(default=list)
+
+    ai_confidence   = models.FloatField(default=0.0)
+    fraud_score     = models.FloatField(default=0.0)
+    ai_raw_response = models.JSONField(default=dict)
+
+    vouch_count     = models.PositiveIntegerField(default=0)
+    vouch_threshold = models.PositiveIntegerField(default=3)
+
+    total_donations_kobo = models.PositiveIntegerField(default=0)
+    donation_count       = models.PositiveIntegerField(default=0)
+
+    is_infrastructure = models.BooleanField(default=False)
+
+    agency_assigned = models.ForeignKey(
+        'organisations.Organisation', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='assigned_incidents'
+    )
+
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    @property
+    def vouch_threshold_for_severity(self):
+        return {'CRITICAL': 1, 'HIGH': 2, 'MEDIUM': 3, 'LOW': 5}.get(self.severity, 3)
+
+    def set_vouch_threshold(self):
+        self.vouch_threshold = self.vouch_threshold_for_severity
+        self.save(update_fields=['vouch_threshold'])
+
+    @property
+    def total_donations_naira(self):
+        return self.total_donations_kobo / 100
+
+
+class IncidentMedia(models.Model):
+    """
+    v6 NEW. Media files attached to an incident.
+    Stored in Supabase Storage bucket. Replaces media_urls JSONField.
+    """
+    MEDIA_TYPES = (
+        ('image', 'Image'),
+        ('video', 'Video'),
+    )
+
+    incident      = models.ForeignKey(Incident, on_delete=models.CASCADE,
+                      related_name='media')
+    media_type    = models.CharField(max_length=10, choices=MEDIA_TYPES)
+    file_url      = models.URLField()
+    storage_path  = models.CharField(max_length=500)
+    thumbnail_url = models.URLField(null=True, blank=True)
+    file_size_kb  = models.IntegerField()
+    uploaded_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['uploaded_at']
+
+
+class ResponseLog(models.Model):
+    incident    = models.ForeignKey(Incident, on_delete=models.CASCADE,
+                    related_name='response_logs')
+    from_status = models.CharField(max_length=20, blank=True)
+    to_status   = models.CharField(max_length=20)
+    actor       = models.CharField(max_length=200)
+    note        = models.TextField(blank=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+
+class VouchRecord(models.Model):
+    incident      = models.ForeignKey(Incident, on_delete=models.CASCADE,
+                      related_name='vouches')
+    session_hash  = models.CharField(max_length=64)
+    voucher_lat   = models.FloatField(null=True, blank=True)
+    voucher_lng   = models.FloatField(null=True, blank=True)
+    distance_km   = models.FloatField(null=True, blank=True)
+    is_suspicious = models.BooleanField(default=False)
+    source        = models.CharField(max_length=20,
+                      choices=[('WEB', 'Web'), ('WHATSAPP', 'WhatsApp reaction')],
+                      default='WEB')
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('incident', 'session_hash')
+
+--------------------------------------------------------------------------------
+7.2 RESPONDERS APP MODELS (apps/responders/models.py)
+--------------------------------------------------------------------------------
+
+[Unchanged from v5. Full model code in v5 Section 7.2.]
+
+--------------------------------------------------------------------------------
+7.3 ORGANISATIONS APP MODELS (apps/organisations/models.py)
+--------------------------------------------------------------------------------
+
+[Unchanged from v5. Full model code in v5 Section 7.3.]
+
+--------------------------------------------------------------------------------
+7.4 RESOURCES APP MODELS (apps/resources/models.py)
+--------------------------------------------------------------------------------
+
+[Unchanged from v5. Full model code in v5 Section 7.4.]
+Includes: ResourceItem, ResourceClaim, Donation.
+
+--------------------------------------------------------------------------------
+7.5 SUBSCRIPTIONS APP MODELS (apps/subscriptions/models.py)
+--------------------------------------------------------------------------------
+
+[Unchanged from v5. Full model code in v5 Section 7.5.]
+Includes: LocationSubscription (POINT + COMMUTE), SubscriptionAlert,
+SafetyScoreLog.
+
+================================================================================
+SECTION 8 — CELERY SETUP
+================================================================================
+
+[Unchanged from v5.]
+
+# sirenapp/celery.py
+import os
+from celery import Celery
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'sirenapp.settings')
+app = Celery('sirenapp')
+app.config_from_object('django.conf:settings', namespace='CELERY')
+app.autodiscover_tasks()
+
+# sirenapp/__init__.py
+from .celery import app as celery_app
+__all__ = ('celery_app',)
+
+================================================================================
+SECTION 9 — API ENDPOINTS
+================================================================================
+
+All prefixed /api/. JWT required only where stated.
+
+--------------------------------------------------------------------------------
+9.1 ROOT URL CONFIG (sirenapp/urls.py)
+--------------------------------------------------------------------------------
+
+from django.contrib import admin
+from django.urls import path, include
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('api/ingest/', include('apps.whatsapp.urls')),
+    path('api/incidents/', include('apps.incidents.urls')),
+    path('api/responders/', include('apps.responders.urls')),
+    path('api/organisations/', include('apps.organisations.urls')),
+    path('api/resources/', include('apps.resources.urls')),
+    path('api/subscriptions/', include('apps.subscriptions.urls')),
+    path('api/analytics/', include('apps.analytics.urls')),
+    path('api/auth/', include('rest_framework_simplejwt.urls')),
+]
+
+--------------------------------------------------------------------------------
+9.2 INCIDENT ENDPOINTS
+--------------------------------------------------------------------------------
+
+POST   /api/ingest/whatsapp/          Twilio webhook. Validates signature. 200 always.
+POST   /api/ingest/web/               Web form. Returns {id, tracking_url}.
+GET    /api/incidents/                Public paginated feed. VERIFIED+ only.
+GET    /api/incidents/active/         All active for map. No pagination.
+GET    /api/incidents/{id}/           Detail with logs, vouches, resources,
+                                      media array, donations.
+GET    /api/incidents/{id}/track/     Reporter tracking. No auth.
+POST   /api/incidents/{id}/vouch/     Submit vouch. 1 per session.
+PATCH  /api/incidents/{id}/dispatch/  JWT. Sets AGENCY_NOTIFIED.
+PATCH  /api/incidents/{id}/resolve/   JWT. Sets RESOLVED.
+
+# v6 NEW — Media
+POST   /api/incidents/{id}/media/     Upload. Multipart. Field: 'files'. Max 5.
+                                      Returns {uploaded:[], errors:[]}.
+                                      HTTP 201 (all ok), 207 (partial), 400 (none).
+DELETE /api/media/{media_id}/         Delete. Reporter own or admin any. 204.
+
+--------------------------------------------------------------------------------
+9.3 RESPONDER ENDPOINTS (unchanged)
+--------------------------------------------------------------------------------
+
+POST   /api/responders/register/
+POST   /api/responders/availability/
+POST   /api/responders/dispatch/{id}/accept/
+POST   /api/responders/dispatch/{id}/decline/
+POST   /api/responders/dispatch/{id}/onscene/
+POST   /api/responders/dispatch/{id}/complete/
+
+--------------------------------------------------------------------------------
+9.4 ORGANISATION ENDPOINTS (unchanged)
+--------------------------------------------------------------------------------
+
+POST   /api/organisations/register/
+POST   /api/organisations/{id}/respond/
+GET    /api/organisations/map/
+GET    /api/organisations/{id}/
+
+--------------------------------------------------------------------------------
+9.5 RESOURCE BOARD ENDPOINTS (unchanged)
+--------------------------------------------------------------------------------
+
+GET    /api/resources/?incident={id}
+POST   /api/resources/
+POST   /api/resources/{id}/claim/
+POST   /api/resources/{id}/confirm/
+
+--------------------------------------------------------------------------------
+9.6 DONATION ENDPOINTS (unchanged)
+--------------------------------------------------------------------------------
+
+POST   /api/resources/donate/
+POST   /api/resources/donate/verify/
+GET    /api/resources/donations/?incident={id}
+
+--------------------------------------------------------------------------------
+9.7 SUBSCRIPTION ENDPOINTS (unchanged)
+--------------------------------------------------------------------------------
+
+POST   /api/subscriptions/
+POST   /api/subscriptions/commute/
+GET    /api/subscriptions/?phone_hash={hash}
+PATCH  /api/subscriptions/{id}/
+DELETE /api/subscriptions/{id}/
+GET    /api/subscriptions/my-impact/?phone_hash={hash}
+
+--------------------------------------------------------------------------------
+9.8 ANALYTICS ENDPOINTS (JWT required, unchanged)
+--------------------------------------------------------------------------------
+
+GET    /api/analytics/summary/?range=7d
+GET    /api/analytics/zones/
+GET    /api/analytics/trends/
+GET    /api/analytics/donations/
+GET    /api/analytics/subscribers/
+
+--------------------------------------------------------------------------------
+9.9 AUTH
+--------------------------------------------------------------------------------
+
+POST   /api/auth/token/
+POST   /api/auth/token/refresh/
+
+--------------------------------------------------------------------------------
+9.10 WEBSOCKET (sirenapp/asgi.py) — unchanged
+--------------------------------------------------------------------------------
+
+WebSocket message format on every incident status change:
+{
+  "type": "incident.update",
+  "incident_id": "uuid",
+  "status": "VERIFIED",
+  "incident_type": "HAZARD",
+  "severity": "HIGH",
+  "is_infrastructure": true,
+  "zone_name": "Ojota",
+  "lat": 6.5244,
+  "lng": 3.3792,
+  "vouch_count": 3,
+  "total_donations_naira": 0,
+  "resource_count": 2,
+  "media_count": 2,
+  "updated_at": "2026-03-09T14:23:00Z"
+}
+
+================================================================================
+SECTION 10 — CLAUDE AI VERIFICATION TASK (apps/incidents/tasks.py)
+================================================================================
+
+[Unchanged from v5. Full code in v5 Section 10.]
+
+Key points:
+  - is_infrastructure flag set by Claude when report mentions transformer,
+    wire, pole, power line, NEPA, EKEDC, fallen cable, or similar.
+  - notify_commute_shield triggered for HAZARD/RTA/FLOOD incidents.
+  - zone_name extracted by Claude from address_text.
+
+================================================================================
+SECTION 11 — WHATSAPP FLOWS
+================================================================================
+
+[Unchanged from v5. Full flows in v5 Section 11.]
+
+All flows still exist and work as specified. The only change in v6 is that
+the frontend no longer shows WhatsApp CTAs on most pages. The backend
+WhatsApp functionality (notifications, alerts, briefings, commands) is
+completely unchanged.
+
+Key flows reference:
+  11.1  Inbound message router (includes all v5 commands)
+  11.2  Emergency report flow
+  11.3  Vouching flow
+  11.4  Resource board WhatsApp entry
+  11.5  Donation entry via WhatsApp
+  11.6  WATCH flow — Guardian Mode (POINT)
+  11.7  WATCH flow — Commute Shield (COMMUTE)
+  11.8  Guardian alert message
+  11.9  Commute Shield alert
+  11.10 Daily commute briefing (6:30am + 4:30pm)
+  11.11 Guardian closure — MY IMPACT message
+  11.12 Responder notification
+  11.13 Organisation notification
+
+================================================================================
+SECTION 12 — SUBSCRIPTION TASKS (apps/subscriptions/tasks.py)
+================================================================================
+
+[Unchanged from v5. Full code in v5 Section 12.]
+
+  12.1  notify_location_subscribers — POINT subscription alerts
+  12.2  notify_commute_shield — COMMUTE corridor alerts (peak hours only
+        unless CRITICAL severity)
+  12.3  daily_safety_score_update — runs 6am daily via celery-beat
+  12.4  send_commute_briefing — runs 6:30am + 4:30pm via celery-beat
+
+================================================================================
+SECTION 13 — DONATION FLOW (PAYSTACK)
+================================================================================
+
+[Unchanged from v5. Full flow in v5 Section 13.]
+
+Fund split logic:
+  PLATFORM:  100% to Siren main account.
+  RESPONDER: 10% to Siren, 90% split to on-scene responders.
+  VICTIM:    10% to Siren, 90% to Victim Relief holding sub-account.
+
+================================================================================
+SECTION 14 — FRONTEND PAGES
+================================================================================
+
+UPDATED IN v6. All pages redesigned around ICP (Section 1.2).
+WhatsApp CTAs removed from all pages except /connect.
+WhatsApp backend functionality is unchanged.
+
+--------------------------------------------------------------------------------
+14.1 DESIGN TOKENS
+--------------------------------------------------------------------------------
+
+Primary red:    #C0392B
+Background:     #FAFAFA
+Card surface:   #FFFFFF
+Text primary:   #0D0D0D
+Text body:      #4A4A4A
+Text muted:     #9E9E9E
+Success green:  #1A6B3C
+Warning amber:  #D35400
+Border:         #E8E8E8
+Font:           Inter
+
+Severity badges:
+  CRITICAL = red bg, white text, CSS pulse animation
+  HIGH     = red bg, white text
+  MEDIUM   = amber bg, white text
+  LOW      = yellow bg, dark text
+
+Status badges:
+  VERIFIED        = light blue bg, dark blue text
+  RESPONDING      = light green bg, dark green text, animated pulse dot
+  VERIFYING       = light yellow bg, amber text, animated pulse dot
+  RESOLVED        = light green bg, dark green text
+  AGENCY_NOTIFIED = light purple bg, purple text
+  REJECTED        = light grey bg, muted text
+
+Resource status:
+  NEEDED  = light red bg, red text
+  CLAIMED = amber bg, dark text
+  ARRIVED = green bg, white text, strikethrough on label
+
+--------------------------------------------------------------------------------
+14.2 PAGE ROUTES
+--------------------------------------------------------------------------------
+
+Public routes:
+  /                   HomePage (redesigned for ICP)
+  /map                MapPage
+  /feed               FeedPage
+  /track/:id          TrackPage
+  /report             ReportPage
+  /join               JoinPage (web-first registration)
+  /watch              WatchPage (Guardian + Commute Shield, web-first)
+  /connect            WhatsApp Integration Hub (NEW v6 — see Section 18)
+  /donate/:id         DonatePage
+  /donate/success     DonateSuccessPage
+  /organisations      OrgsPage
+  /my-impact          MyImpactPage (?phone_hash= in URL)
+
+Dashboard routes (JWT required):
+  /login
+  /dashboard
+  /dashboard/incidents
+  /dashboard/incidents/:id
+  /dashboard/analytics
+  /dashboard/responders
+  /dashboard/organisations
+  /dashboard/subscribers
+  /dashboard/donations
+
+--------------------------------------------------------------------------------
+14.3 NAVIGATION
+--------------------------------------------------------------------------------
+
+Primary nav:
+  Logo → /
+  Map → /map
+  Feed → /feed
+  Report Incident → /report
+  Connect WhatsApp → /connect    (single WhatsApp entry point)
+  Dashboard → /login (only if JWT present)
+
+Footer:
+  How it works | Become a Responder | Register Organisation |
+  WhatsApp Integration (/connect) | Privacy Policy
+
+--------------------------------------------------------------------------------
+14.4 PAGE SPECIFICATIONS
+--------------------------------------------------------------------------------
+
+HOME PAGE (/)
+  Redesigned for ICP. Lead with protection, not reporting.
+
+  HERO: "Protect the people you love in Lagos."
+  Sub: "Get instant alerts when emergencies happen near your home,
+        your children's school, or anywhere your family lives."
+  Background: subtle map of Lagos with animated alert dots.
+
+  PRIMARY CTA (above fold): "Watch a location" — opens inline location
+  save flow (no page redirect). No account required.
+
+  SECONDARY CTA: "Report an incident you see right now" → /report
+
+  TRUST INDICATORS: 3 live stat counters:
+    Incidents verified this month / Average response time / Active responders
+
+  HOW IT WORKS (3 steps):
+    1. Save your family's locations.
+    2. We watch for verified threats nearby.
+    3. You get an instant alert with full details.
+  Clean icon-card layout. No WhatsApp mentioned here.
+
+  LIVE INCIDENT TICKER: Last 5 resolved incidents. Type icon, zone,
+  time to resolve, contribution summary.
+
+  ZONE GRID: 10 Lagos areas with active incident count badge.
+
+  COMMUTE SHIELD CTA: "Daily commuter? Protect your route." → /watch
+
+  RESPONDER/ORG CTA STRIP: Below fold. → /join
+
+  FOOTER: One "Connect WhatsApp" link → /connect. No other WhatsApp CTAs.
+
+MAP PAGE (/map)
+  Full-screen react-leaflet. OpenStreetMap tiles.
+  Center [6.5244, 3.3792] Lagos. Zoom 12.
+  Incident pins: CircleMarker by severity. CRITICAL/HIGH pulse.
+  Org pins: distinct icon by type.
+  Filter bar: All / FIRE / FLOOD / COLLAPSE / RTA / EXPLOSION / DROWNING / HAZARD
+  Toggle: "My Saved Locations" — heart pins for Guardian subscriptions
+  Toggle: "My Commute Corridor" — Polyline between home+office pins
+  Popup on pin click: type, severity, status, vouch count, media count,
+  donation total, Vouch button, "View full details" → /track/:id
+  WebSocket: pins update live. No WhatsApp CTAs.
+
+FEED PAGE (/feed)
+  Paginated list. 20 per page. Load more.
+  Filters: zone_name, incident_type, severity, status.
+  IncidentCard:
+    Top: severity badge | type icon | status badge | time ago
+    Middle: description 2 lines (expand on click)
+    Bottom: location | vouch count | media count | donation total | Vouch
+    Expanded: ResponseLog timeline + resource board summary
+  Share button: Web Share API. No dedicated WhatsApp share button.
+  No WhatsApp CTAs.
+
+TRACK PAGE (/track/:id)
+  Most important public page. Reporter lands here from link.
+
+  TOP BAR: Logo + "Live incident tracking" + Share (Web Share API)
+
+  COMMUTE BANNER: If ?from=commute in URL, show:
+  "This incident is on your saved route."
+
+  HERO STATUS CARD: Type, severity badge, live status (WebSocket),
+  time since report, zone. Pulse animation on active statuses.
+
+  RESPONSE TIMELINE: Chronological log. Live via WebSocket.
+
+  MINI MAP: Leaflet with incident pin.
+
+  MEDIA GALLERY (v6 NEW):
+    Grid of attached images/videos. Lightbox on click.
+    Visible as soon as any media exists.
+    "Add photo or video" button (reporter session only).
+    Upload modal: drag-and-drop or file picker, max 5, preview thumbnails.
+    Calls POST /api/incidents/{id}/media/
+
+  RESOURCE BOARD: Visible once VERIFIED.
+    Items with NEEDED/CLAIMED/ARRIVED badges and claim counts.
+    "Add what you can bring" → suggest modal.
+    "I can bring this" → claim modal.
+    Reporter sees "Confirm arrived" on CLAIMED items.
+
+  DONATION SECTION: Visible once VERIFIED.
+    Three fund cards: Victim Relief / Responder Appreciation /
+    Emergency Response Fund.
+    Donate modal → Paystack redirect.
+
+  VOUCH BUTTON: Visible for VERIFYING. Session-limited.
+
+  SAFE CHECK: "Are you safe?" if reporter session.
+
+REPORT PAGE (/report)
+  4-step form. Under 60 seconds. No account.
+
+  Step 1: Incident type — 7 large icon buttons.
+  Step 2: Location — geolocation button + address text. Mini map preview.
+  Step 3: Describe — textarea, 500 char max.
+  Step 4: Media (v6 NEW) — drag-and-drop or file picker. Max 5 files.
+          Preview thumbnails before submit.
+          Optional but encouraged: "Photos help verify faster."
+  Submit: POST /api/ingest/web/ → redirect to /track/:id
+  No WhatsApp CTAs.
+
+WATCH PAGE (/watch)
+  Web-first. No WhatsApp required.
+
+  GUARDIAN MODE SECTION:
+    Inline flow — no page redirect.
+    Step 1: Name the location.
+    Step 2: Location type (6 icon buttons).
+    Step 3: Drop pin on Leaflet map or use geolocation.
+    Step 4: Alert radius (500m / 1km / 2km / 5km) with ring overlay.
+    Step 5: Notification method — Email (default) or WhatsApp (enter number).
+    Step 6: Confirmation.
+    Submits to POST /api/subscriptions/
+
+  COMMUTE SHIELD SECTION:
+    Two-pin map. Home and Office on same Leaflet map.
+    Peak hours shown: 6-10am and 4-8pm.
+    Submits to POST /api/subscriptions/commute/
+
+  MANAGE LOCATIONS: Enter phone/email → list with pause/edit/delete.
+
+  SAMPLE ALERT PREVIEW: Styled card showing what an alert looks like.
+
+  WHATSAPP FOOTNOTE (bottom of page):
+    "Prefer WhatsApp? You can also manage locations via Siren on WhatsApp."
+    Link → /connect. Not a CTA. A footnote.
+
+JOIN PAGE (/join)
+  Web-first. Two columns: Responder | Organisation.
+  Inline web forms. Submit to API endpoints.
+  "Prefer WhatsApp? Alternative available." Link → /connect per column.
+
+DONATE PAGE (/donate/:id) — Unchanged from v5
+DONATE SUCCESS PAGE (/donate/success) — Unchanged from v5
+ORGANISATIONS PAGE (/organisations) — Unchanged from v5
+
+MY IMPACT PAGE (/my-impact?phone_hash=...) — Unchanged from v5
+  Safety score charts (Recharts, 90 days per location).
+  Impact stats: alerts received, incidents near, donations, responders.
+  Shareable card.
+
+CONNECT PAGE (/connect) — NEW v6
+  Full spec in Section 18.
+
+DASHBOARD PAGES — Unchanged from v5
+  v6 addition: DashboardIncidentDetail shows IncidentMedia inline
+  with admin delete control.
+
+--------------------------------------------------------------------------------
+14.5 MAP SETUP
+--------------------------------------------------------------------------------
+
+// frontend/src/main.tsx — must be first import
+import 'leaflet/dist/leaflet.css'
+
+<MapContainer center={[6.5244, 3.3792]} zoom={12} style={{height:'100vh',width:'100%'}}>
+  <TileLayer
+    url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+    attribution='OpenStreetMap contributors'
+  />
+</MapContainer>
+
+================================================================================
+SECTION 15 — DJANGO ADMIN
+================================================================================
+
+[Base admin from v5 unchanged. v6 addition below.]
+
+# apps/incidents/admin.py — add IncidentMedia inline
+
+from .models import Incident, IncidentMedia, ResponseLog, VouchRecord
+
+class IncidentMediaInline(admin.TabularInline):
+    model = IncidentMedia
+    readonly_fields = ['media_type', 'file_url', 'storage_path',
+                       'file_size_kb', 'uploaded_at']
+    extra = 0
+    can_delete = True
+
+@admin.register(Incident)
+class IncidentAdmin(admin.ModelAdmin):
+    inlines = [IncidentMediaInline]
+    list_display = ['id', 'incident_type', 'severity', 'status', 'zone_name',
+                    'is_infrastructure', 'vouch_count', 'ai_confidence',
+                    'fraud_score', 'total_donations_kobo', 'created_at']
+    list_filter  = ['status', 'incident_type', 'severity', 'source', 'is_infrastructure']
+    search_fields = ['description', 'address_text', 'zone_name']
+    ordering     = ['-created_at']
+    readonly_fields = ['id', 'reporter_hash', 'ai_raw_response', 'created_at', 'updated_at']
+    actions = ['mark_verified', 'mark_resolved', 'mark_rejected']
+
+    def mark_verified(self, req, qs): qs.update(status='VERIFIED')
+    def mark_resolved(self, req, qs): qs.update(status='RESOLVED')
+    def mark_rejected(self, req, qs): qs.update(status='REJECTED')
+
+================================================================================
+SECTION 16 — BUILD PHASES
+================================================================================
+
+Phases 1–7: COMPLETE. Railway is live.
+
+Phase 1 — Incidents App:           COMPLETE
+Phase 2 — WhatsApp App:            COMPLETE
+Phase 3 — Responders + Orgs:       COMPLETE
+Phase 4 — Resources + Donations:   COMPLETE
+Phase 5 — Subscriptions:           COMPLETE
+Phase 6 — React Frontend:          COMPLETE
+Phase 7 — Railway Deployment:      COMPLETE
+
+Deployment environment:
+  Platform:    Railway (GitHub-connected, auto-deploy on push)
+  Build tool:  nixpacks
+  Python:      3.13
+  Start cmd:   daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application
+  Migrations:  run automatically in nixpacks build phase
+  DB adapter:  psycopg[binary]>=3.1 (psycopg3)
+
+nixpacks.toml:
+  providers = ["python"]
+  [phases.setup]
+  nixPkgs = ["python313", "python313Packages.pip", "nodejs_20"]
+  [phases.install]
+  cmds = [
+    "python3 -m pip install --upgrade pip",
+    "python3 -m pip install -r requirements.txt",
+    "cd frontend && npm ci"
+  ]
+  [phases.build]
+  cmds = [
+    "cd frontend && npm run build",
+    "python3 manage.py collectstatic --noinput",
+    "python3 manage.py migrate --noinput"
+  ]
+  [start]
+  cmd = "daphne -b 0.0.0.0 -p $PORT sirenapp.asgi:application"
+
+================================================================================
+SECTION 17 — MEDIA UPLOAD REQUIREMENTS (NEW v6)
+================================================================================
+
+Build media upload before first real user onboarding.
+Without visual evidence, reports are harder to trust and impossible to share.
+
+--------------------------------------------------------------------------------
+17.1 RATIONALE
+--------------------------------------------------------------------------------
+
+Without media upload:
+  - Reporters cannot attach visual proof. A photo of a building on fire is
+    undeniable. A text report is not.
+  - Responders arrive at scenes without context.
+  - Incident pages cannot go viral — no images to share.
+  - Community trust is slower to build.
+
+Media also enables the "postable" goal: shared incident pages with photos
+drive organic awareness of the platform.
+
+--------------------------------------------------------------------------------
+17.2 FUNCTIONAL REQUIREMENTS
+--------------------------------------------------------------------------------
+
+- Users can attach images and/or videos when reporting via web form
+- Users can add media to an existing incident via the Track page
+- WhatsApp media (images sent with reports) is ingested via Twilio and
+  stored in the same system
+- Up to 5 media files per incident (enforced server-side)
+- Supported image formats: JPG, PNG, WebP
+- Supported video formats: MP4, MOV
+- File size limits: 5MB per image, 50MB per video
+- Media linked to a specific incident record in the database
+- Media viewable by reporter, responders, admins on incident page
+- Reporter can delete their own uploaded media
+- Admin can delete any media
+- Partial uploads succeed: if 3 of 5 files fail, the 2 that passed are saved
+
+--------------------------------------------------------------------------------
+17.3 NON-FUNCTIONAL REQUIREMENTS
+--------------------------------------------------------------------------------
+
+- File type validated by content (magic bytes), not by extension
+  Prevents spoofing (e.g. .exe renamed to .jpg)
+- Media stored in Supabase Storage bucket (incident-media), not app server
+- Each file stored under path: incidents/{incident_id}/{uuid}.{ext}
+- Public read URLs generated from Supabase for frontend display
+- Both storage path and public URL persisted in DB
+- Max 5 files enforced at API level regardless of client
+- Per-file error reporting: {file: name, error: reason}
+
+--------------------------------------------------------------------------------
+17.4 DATA REQUIREMENTS
+--------------------------------------------------------------------------------
+
+IncidentMedia model in apps/incidents/models.py (full code in Section 7.1).
+The media_urls JSONField on Incident is deprecated. Do not write to it.
+Existing data in that field stays for backwards compat only.
+
+Fields per media record:
+  incident      ForeignKey to Incident. CASCADE on delete.
+  media_type    'image' or 'video'
+  file_url      Public Supabase Storage URL for display
+  storage_path  Full bucket path for deletion
+  thumbnail_url Optional. Future use for video thumbnails.
+  file_size_kb  File size in kilobytes
+  uploaded_at   Auto-set on creation. Orders media chronologically.
+
+--------------------------------------------------------------------------------
+17.5 API ENDPOINTS
+--------------------------------------------------------------------------------
+
+POST /api/incidents/{incident_id}/media/
+  Accepts: multipart/form-data. Field: 'files' (multiple).
+  Max: 5 files per request.
+  Validates: file type (magic bytes) + file size per file.
+  Uploads each to Supabase Storage.
+  Creates IncidentMedia record per successful upload.
+  Returns:
+    {"uploaded": [{"id": int, "url": str, "media_type": str}],
+     "errors": [{"file": str, "error": str}]}
+  Status: 201 (all ok), 207 (partial), 400 (none succeeded).
+
+DELETE /api/media/{media_id}/
+  Deletes from Supabase Storage bucket.
+  Deletes IncidentMedia record from DB.
+  Access: reporter deletes own (session check), admin deletes any.
+  Returns: 204 on success.
+
+GET /api/incidents/{id}/
+  Updated. Response now includes nested 'media' array:
+  "media": [{"id", "media_type", "file_url", "thumbnail_url",
+             "file_size_kb", "uploaded_at"}]
+
+--------------------------------------------------------------------------------
+17.6 STORAGE SERVICE (services/media_service.py)
+--------------------------------------------------------------------------------
+
+Create this file. All media upload/delete logic lives here.
+
+Functions to implement:
+
+upload_incident_media(file, incident_id):
+  1. validate_file(file) — raises ValidationError on failure
+  2. Generate storage_path: incidents/{incident_id}/{uuid4()}.{ext}
+  3. Read file bytes
+  4. supabase.storage.from_(bucket).upload(path, bytes, content-type)
+  5. Get public URL: supabase.storage.from_(bucket).get_public_url(path)
+  6. Return {url, storage_path, media_type, file_size_kb}
+
+delete_incident_media(storage_path):
+  supabase.storage.from_(bucket).remove([storage_path])
+
+validate_file(file):
+  1. Read first 2048 bytes of file (then seek back to 0)
+  2. magic.from_buffer(header, mime=True) to get actual MIME type
+  3. Check against ALLOWED_IMAGE_TYPES + ALLOWED_VIDEO_TYPES
+  4. Check size against MAX_IMAGE_SIZE_MB / MAX_VIDEO_SIZE_MB
+  5. Return (media_type, mime_type) or raise ValidationError
+
+Supabase client init:
+  from supabase import create_client
+  supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+  Use SUPABASE_SERVICE_KEY (service role), NOT the anon key.
+
+--------------------------------------------------------------------------------
+17.7 SUPABASE STORAGE SETUP (one-time in dashboard)
+--------------------------------------------------------------------------------
+
+1. Storage > New Bucket > Name: "incident-media". Set to Public.
+
+2. In Supabase SQL editor, run:
+
+   CREATE POLICY "Allow authenticated uploads"
+   ON storage.objects FOR INSERT TO authenticated
+   WITH CHECK (bucket_id = 'incident-media');
+
+   CREATE POLICY "Allow public reads"
+   ON storage.objects FOR SELECT TO public
+   USING (bucket_id = 'incident-media');
+
+3. Add SUPABASE_URL and SUPABASE_SERVICE_KEY to Railway environment variables.
+
+--------------------------------------------------------------------------------
+17.8 NEW ENVIRONMENT VARIABLES IN v6
+--------------------------------------------------------------------------------
+
+SUPABASE_URL=https://[REF].supabase.co
+SUPABASE_SERVICE_KEY=your_service_role_key   # Settings > API > service_role
+SUPABASE_STORAGE_BUCKET=incident-media
+
+These are in settings.py (Section 4) and must be added to Railway dashboard.
+
+--------------------------------------------------------------------------------
+17.9 OUT OF SCOPE FOR NOW
+--------------------------------------------------------------------------------
+
+- Video thumbnail generation (requires ffmpeg on Railway)
+- Image compression or resizing on upload
+- Media moderation or flagging
+- End-to-end encryption of media files
+
+================================================================================
+SECTION 18 — WHATSAPP INTEGRATION PAGE (NEW v6)
+================================================================================
+
+All WhatsApp CTAs scattered across the app in v5 are removed and consolidated
+to one dedicated page: /connect.
+
+The backend WhatsApp flows (notifications, alerts, briefings, commands) are
+completely unchanged. Only the frontend CTA placement changes.
+
+--------------------------------------------------------------------------------
+18.1 PAGE: /connect (WhatsApp Integration Hub)
+--------------------------------------------------------------------------------
+
+ABOVE THE FOLD:
+  Headline: "Get Siren alerts directly on WhatsApp"
+  Sub: "Connect once. Get notified instantly when emergencies happen near
+        your saved locations."
+  CTA button: "Connect WhatsApp"
+    Opens: wa.me/[SIREN_NUMBER]?text=CONNECT
+  Trust line: "Your number is never shared. Opt out anytime by replying STOP."
+
+WHAT YOU GET ON WHATSAPP (two cards):
+  Card 1: "Instant incident alerts"
+    Get notified the moment a verified emergency happens within your chosen
+    radius of any saved location.
+  Card 2: "Quick reporting from the field"
+    If you witness an emergency, send a WhatsApp message and we handle the
+    rest. No app, no form.
+
+WHATSAPP COMMANDS REFERENCE:
+  Command             What it does
+  -------             ------------
+  CONNECT             First-time setup and NDPR consent
+  WATCH               Start location subscription flow
+  MY ALERTS           List all active saved locations and radii
+  STOP [label]        Pause alerts for a specific location
+  STOP ALL            Opt out of all Siren messages permanently
+  MY COMMUTE          Check today's commute route status
+  POINT               Save as single Guardian point
+  COMMUTE             Set up Commute Shield (Home + Office corridor)
+  NEED RIDE           Connect with people offering transport near incident
+  MY IMPACT           Get link to your impact page
+  RESPONDER           Register as a community responder
+  REGISTER ORG        Register organisation as verified partner
+  VOUCH [id]          Vouch for an incident
+  YES / NO            Accept or decline a responder dispatch
+  ONSCENE             Confirm arrival at scene
+  DONE                Confirm response complete
+  HELP                Show this command list
+
+HOW EMERGENCY REPORTING WORKS ON WHATSAPP:
+  1. Send a message describing what you see.
+  2. Claude AI verifies your report within 90 seconds.
+  3. You receive a confirmation with a tracking link.
+  4. The tracking link opens the full incident page on Siren.ng.
+
+  Sample chat bubble (show as styled WhatsApp bubble):
+    User: "Fire! Smoke from 3rd floor 14 Adewale Street Surulere"
+    Siren: "VERIFIED — Fire incident, Surulere. Track: siren.ng/track/abc123"
+
+PRIVACY:
+  - WhatsApp number stored as one-way hash. Never in plain text beyond
+    what Twilio requires for delivery.
+  - Never shared with advertisers, third parties, or government.
+  - Compliant with Nigeria's NDPR.
+  - Reply STOP at any time to permanently opt out.
+
+--------------------------------------------------------------------------------
+18.2 WHAT WAS REMOVED FROM OTHER PAGES
+--------------------------------------------------------------------------------
+
+Page          Removed                               Replaced with
+----------    -----------------------------------   ------------------------------
+Home (/)      "Report via WhatsApp" primary CTA     "Save a location" primary CTA
+              WhatsApp number displayed             /connect link in footer only
+Watch         "Send WATCH to Siren" primary CTA     Web form is primary
+              WhatsApp instructions prominent       Footnote: "Also on WhatsApp"
+                                                    → /connect
+Join          WhatsApp prefilled buttons only       Inline web forms primary
+                                                    WhatsApp as alternative
+                                                    → /connect
+Track         Dedicated WhatsApp share button       Web Share API (WA = 1 option)
+Report        WhatsApp alternative suggestion       Removed entirely
+
+================================================================================
+SECTION 19 — CRITICAL NOTES FOR CLAUDE CODE
+================================================================================
+
+Read all of these before writing a single line of code.
+
+1.  NO GEODJANGO EVER.
+    Every models.py: from django.db import models
+    NEVER gis imports. NEVER PointField or PolygonField.
+    All location = two FloatFields. All spatial = utils/distance.py.
+
+2.  HAVERSINE USES HAVING NOT WHERE.
+    distance_km is a computed column alias. HAVING filters it.
+    Do not change HAVING to WHERE. It will break.
+
+3.  DATABASE ADAPTER IS PSYCOPG3 (NOT PSYCOPG2).
+    requirements.txt: psycopg[binary]>=3.1
+    DO NOT add psycopg2. Fails on Python 3.13 in Railway.
+    psycopg3 bundles libpq internally. Django engine string unchanged:
+    'django.db.backends.postgresql'
+
+4.  TWILIO SIGNATURE VALIDATION IS MANDATORY.
+    from twilio.request_validator import RequestValidator
+    Reject 403 if validation fails.
+
+5.  WHATSAPP NUMBER FORMAT.
+    Always: 'whatsapp:+2348012345678'
+    Strip when storing: phone = from_number.replace('whatsapp:', '')
+
+6.  CLAUDE RESPONSE CLEANING.
+    text = re.sub(r'```json|```', '', text).strip()
+    result = json.loads(text)
+
+7.  PHONE PRIVACY.
+    SHA256(phone) as phone_hash. Keep actual number only where needed.
+    hashlib.sha256(phone.encode()).hexdigest()
+
+8.  JWT ONLY FOR AGENCY/ADMIN DASHBOARD.
+    Public users never log in. Phone_hash or session token only.
+
+9.  JWT IN REACT: useState or Context. Never localStorage.
+
+10. LEAFLET CSS: first import in main.tsx. Non-negotiable.
+
+11. CELERY IN PRODUCTION: CELERY_ALWAYS_EAGER=False. Redis required.
+
+12. SUPABASE: Direct Connection URI (port 5432). Never the pooler.
+
+13. PAYSTACK WEBHOOK: HMAC SHA512 with PAYSTACK_SECRET_KEY.
+    Reject non-matching X-Paystack-Signature.
+
+14. DONATION AMOUNTS IN KOBO.
+    Store kobo. Display naira. amount_kobo = int(amount_naira * 100)
+
+15. SUBSCRIPTION BROAD SWEEP.
+    notify_location_subscribers uses 10km broad sweep, then filters per
+    subscription's own alert_radius_km in Python. Do not change the 10km.
+
+16. COMMUTE SHIELD PEAK HOURS.
+    Africa/Lagos. Morning 6-10am. Evening 4-8pm (16-20).
+    Always run for CRITICAL severity regardless of time.
+
+17. POINT-TO-LINE DISTANCE IS APPROXIMATE.
+    Flat-earth. Accurate enough for Lagos corridors. Do not replace.
+
+18. RESOURCECLAIM DUPLICATE.
+    Catch IntegrityError. Return 200 "already claimed" — not 400.
+
+19. SAFETY SCORE FORMULA.
+    Start 100. -5 per verified incident in radius in 30 days. Floor 0.
+
+20. COMMUTE BRIEFING RUNS TWICE DAILY.
+    Same task (send_commute_briefing) at 6:30am and 4:30pm.
+    Detects morning/evening from current Lagos hour.
+
+21. MY IMPACT PAGE IS PUBLIC.
+    phone_hash in URL query string. No JWT. Hash = access token.
+
+22. SUPABASE STORAGE — USE SERVICE KEY.
+    SUPABASE_SERVICE_KEY (service role) for all backend operations.
+    Never use the anon key for backend storage operations.
+
+23. MEDIA FILE TYPE VALIDATION IS BY MAGIC BYTES.
+    Use python-magic. Do not trust file extension or Content-Type header.
+
+24. MEDIA UPLOAD IS MULTIPART.
+    Parser: MultiPartParser. Field name: 'files'. Supports multiple files.
+    Max 5 enforced at API level regardless of client.
+
+25. INCIDENT MEDIA MODEL REPLACES media_urls JSONField.
+    Do not write to media_urls on new incidents.
+    JSONField stays in schema for backwards compat only.
+
+26. ZONE_NAME IS EXTRACTED BY CLAUDE.
+    Claude AI fills zone_name from address_text during verification.
+    Do not require users to supply zone_name directly.
+
+================================================================================
+SECTION 20 — v6 UPDATE INSTRUCTIONS FOR EXISTING v5 MVP
+================================================================================
+
+READ THIS FIRST:
+Railway deployment is complete. These are surgical additions to the
+live codebase. Do not rebuild anything. Every change is additive.
+
+Estimated time: 1 day.
+
+--------------------------------------------------------------------------------
+UPDATE 1 — Install new packages
+--------------------------------------------------------------------------------
+
+Add to requirements.txt:
+  supabase
+  Pillow
+  python-magic
+
+Commit and push to trigger Railway redeploy. Packages auto-install.
+
+--------------------------------------------------------------------------------
+UPDATE 2 — Add IncidentMedia model
+--------------------------------------------------------------------------------
+
+FILE: apps/incidents/models.py
+ACTION: Add IncidentMedia class from Section 7.1 after VouchRecord.
+        Do NOT remove or change media_urls JSONField.
+
+Run locally then push:
+  python manage.py makemigrations incidents
+  python manage.py migrate
+
+Railway will run migrate automatically on next deploy.
+
+--------------------------------------------------------------------------------
+UPDATE 3 — Create storage service
+--------------------------------------------------------------------------------
+
+NEW FILE: services/__init__.py     (empty)
+NEW FILE: services/media_service.py
+
+Implement three functions from Section 17.6:
+  upload_incident_media, delete_incident_media, validate_file
+
+--------------------------------------------------------------------------------
+UPDATE 4 — Add media API endpoints
+--------------------------------------------------------------------------------
+
+FILE: apps/incidents/views.py
+ACTION: Add upload_media view and delete_media view (Section 17.5 spec)
+
+FILE: apps/incidents/urls.py
+ACTION: Add URL patterns:
+  path('<uuid:incident_id>/media/', views.upload_media),
+  path('media/<int:media_id>/', views.delete_media),
+
+FILE: apps/incidents/serializers.py
+ACTION: Add IncidentMediaSerializer.
+        Update IncidentDetailSerializer to include nested 'media' array.
+
+--------------------------------------------------------------------------------
+UPDATE 5 — Update settings
+--------------------------------------------------------------------------------
+
+FILE: sirenapp/settings.py
+ACTION: Add Supabase Storage block from Section 4:
+  SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_STORAGE_BUCKET,
+  MAX_IMAGE_SIZE_MB, MAX_VIDEO_SIZE_MB,
+  ALLOWED_IMAGE_TYPES, ALLOWED_VIDEO_TYPES
+
+Also ensure CELERY_ALWAYS_EAGER default is now False (production).
+
+--------------------------------------------------------------------------------
+UPDATE 6 — Add environment variables to Railway
+--------------------------------------------------------------------------------
+
+Railway dashboard > your service > Variables. Add:
+  SUPABASE_URL=https://[REF].supabase.co
+  SUPABASE_SERVICE_KEY=your_service_role_key
+  SUPABASE_STORAGE_BUCKET=incident-media
+
+--------------------------------------------------------------------------------
+UPDATE 7 — Update Django admin
+--------------------------------------------------------------------------------
+
+FILE: apps/incidents/admin.py
+ACTION: Add IncidentMediaInline from Section 15.
+        Add inline = [IncidentMediaInline] to IncidentAdmin.
+
+--------------------------------------------------------------------------------
+UPDATE 8 — Frontend: Report page
+--------------------------------------------------------------------------------
+
+FILE: frontend/src/pages/ReportPage.tsx
+ACTION: Add Step 4 (media upload) from Section 14.4.
+        After form submits and gets incident ID, if files selected,
+        POST files to /api/incidents/{id}/media/
+
+--------------------------------------------------------------------------------
+UPDATE 9 — Frontend: Track page
+--------------------------------------------------------------------------------
+
+FILE: frontend/src/pages/TrackPage.tsx
+ACTION: Add MEDIA GALLERY section from Section 14.4.
+        Render incident.media grid from detail endpoint.
+        Show upload button for reporter session.
+        Lightbox on image/video click.
+
+--------------------------------------------------------------------------------
+UPDATE 10 — Frontend: /connect page
+--------------------------------------------------------------------------------
+
+NEW FILE: frontend/src/pages/ConnectPage.tsx
+ACTION: Build full page from Section 18.1.
+        All commands reference table. Chat bubble preview. Privacy section.
+
+FILE: frontend/src/App.tsx
+ACTION: Add route: <Route path='/connect' element={<ConnectPage />} />
+
+FILE: frontend/src/components/Nav.tsx (or equivalent)
+ACTION: Replace scattered WhatsApp CTAs with single "Connect WhatsApp" → /connect
+
+Remove WhatsApp CTAs from: HomePage, WatchPage, JoinPage, ReportPage.
+See Section 18.2 for exact replacements per page.
+
+--------------------------------------------------------------------------------
+UPDATE 11 — Supabase Storage bucket
+--------------------------------------------------------------------------------
+
+One-time setup in Supabase dashboard. Steps in Section 17.7.
+Do this before deploying the media upload code.
+
+--------------------------------------------------------------------------------
+TESTING CHECKLIST FOR v6 UPDATES
+--------------------------------------------------------------------------------
+
+1.  makemigrations + migrate. Confirm IncidentMedia table exists in Supabase.
+
+2.  POST /api/incidents/{id}/media/ with a valid JPG.
+    Check: IncidentMedia record in admin.
+    Check: File visible in Supabase Storage > incident-media bucket.
+    Check: Public URL loads image in browser.
+
+3.  POST with a file that has wrong content (e.g. .exe renamed .jpg).
+    Check: API rejects with magic bytes error.
+
+4.  POST with 6 files.
+    Check: API returns 400 (max 5 enforced).
+
+5.  DELETE /api/media/{id}/
+    Check: File removed from Supabase bucket.
+    Check: IncidentMedia record deleted.
+
+6.  GET /api/incidents/{id}/ — confirm 'media' array in response.
+
+7.  Submit report via /report with 2 photos.
+    Check: Media appears in gallery on /track/:id.
+
+8.  Open /connect — confirm commands table, privacy section, CTA.
+
+9.  Open / (home) — confirm no WhatsApp CTAs except footer link to /connect.
+
+10. Open /watch — confirm web form is primary, WhatsApp is footnote only.
+
+11. Open /join — confirm inline web forms present, WhatsApp is secondary.
+
+--------------------------------------------------------------------------------
+WHAT DOES NOT CHANGE IN v6
+--------------------------------------------------------------------------------
+
+  - All backend WhatsApp flows (Sections 11, 12) — unchanged
+  - All subscription tasks (Guardian, Commute Shield) — unchanged
+  - All donation/Paystack logic — unchanged
+  - All responder notification flows — unchanged
+  - All organisation flows — unchanged
+  - All vouching logic — unchanged
+  - utils/distance.py — unchanged
+  - Celery setup — unchanged
+  - ASGI/WebSocket setup — unchanged
+  - All data models except IncidentMedia addition — unchanged
+  - All existing API endpoints — unchanged
+  - nixpacks.toml — unchanged
+  - Railway deployment config — unchanged
+  - MyImpactPage — unchanged
+  - All dashboard pages — unchanged (media inline added to incident detail)
+
+================================================================================
+
+================================================================================
+SIREN.NG — SECTION 21: UI/UX PSYCHOLOGY & PREMIUM DESIGN SYSTEM
+Version 6 Addition — March 2026
+================================================================================
+
+READ THIS BEFORE WRITING A SINGLE COMPONENT.
+This section governs every visual, interaction, and copy decision in the
+frontend. It is not a style guide. It is a psychological operating manual.
+Every decision here is grounded in how the human brain actually works —
+especially under stress, on mobile, in Lagos, as a mother who needs to
+feel in control of something she cannot physically see.
+
+================================================================================
+21.1 THE PSYCHOLOGICAL CONTEXT OF OUR USERS
+================================================================================
+
+Before picking a colour or writing a label, understand what state our users
+are in when they open Siren.ng.
+
+--------------------------------------------------------------------------------
+THE MOTHER (ICP Primary)
+--------------------------------------------------------------------------------
+
+Neurological state when she arrives:
+  - Baseline: mild chronic anxiety (city noise, children away, traffic)
+  - Triggered state: elevated cortisol from a WhatsApp alert, a news story,
+    or a neighbour's message. Amygdala is activated. She is NOT in a calm,
+    rational, exploratory state.
+  - She is on a phone, thumb-first, often in a moving vehicle or cooking.
+
+What her brain needs from us:
+  1. IMMEDIATE reassurance — "You are in control. Your family is being watched."
+  2. ZERO ambiguity — no guessing what to press, no reading paragraphs
+  3. VISIBLE progress — she needs to see that something is happening
+  4. CLOSURE — every interaction must have a satisfying end state
+  5. TRUST signals — she will abandon a platform that feels cheap or amateur
+
+What triggers abandonment in her brain:
+  - Too many choices at once (decision paralysis — Hick's Law)
+  - Red/alarm colours on non-emergency UI elements (false alarm fatigue)
+  - Small tap targets (physical frustration on mobile)
+  - Jargon she doesn't recognise (cognitive load spike)
+  - Anything that looks like social media (trust mismatch — wrong mental model)
+
+--------------------------------------------------------------------------------
+THE COMMUTER (ICP Secondary)
+--------------------------------------------------------------------------------
+
+Neurological state:
+  - Pre-commute: mildly rushed, planning mode
+  - During commute: distracted, attention divided between road and phone
+  - Post-incident discovery: frustration, regret, mild anger at lost time
+
+What his/her brain needs:
+  1. AT-A-GLANCE information — maximum 3 seconds to understand status
+  2. SPATIAL anchoring — map context first, text second
+  3. ACTIONABLE next step — not "there's a wire down" but "here's your route"
+  4. BREVITY — no paragraph, no modal, no onboarding friction
+
+What triggers abandonment:
+  - Information that requires reading while moving
+  - Anything that requires more than 2 taps to get to the commute status
+  - Push notification that opens to a loading screen
+
+--------------------------------------------------------------------------------
+SHARED PSYCHOLOGICAL PROFILE
+--------------------------------------------------------------------------------
+
+Both users are experiencing:
+
+  Loss aversion bias:
+    "What I might lose" (child at risk, wasted commute time) is 2x more
+    motivating than "what I might gain." All CTAs must be framed around
+    protection from loss, not acquisition of benefit.
+    RIGHT:  "Watch Timi's school — be the first to know if anything happens"
+    WRONG:  "Get alerts for locations you care about"
+
+  The Endowment Effect:
+    Once a user saves a location, it feels like THEIRS. "My saved locations"
+    creates ownership. Ownership creates retention. Ownership creates daily
+    checking habits. Design every saved location card to feel personal and
+    precious — not like a database row.
+
+  Mere Exposure Effect:
+    Trust is built through repetition of familiar, high-quality aesthetics.
+    Every screen must look like the same product. No inconsistent spacing,
+    no mismatched fonts, no buttons that look different on different pages.
+    Inconsistency = subconscious distrust.
+
+  Social Proof Bias:
+    "2,341 Lagos families protected this month" is more persuasive than any
+    feature description. Real numbers. Real zones. Real response times.
+    Always visible. Always live.
+
+================================================================================
+21.2 THE PREMIUM DESIGN PHILOSOPHY
+================================================================================
+
+Siren.ng is NOT:
+  - A government app (avoid bureaucratic grey, form-heavy layouts)
+  - A news feed (avoid card-stack social media patterns)
+  - A startup MVP (avoid thin fonts, cramped spacing, generic icons)
+
+Siren.ng IS:
+  - The premium safety layer of Lagos — think Bloomberg for emergencies,
+    not CNN Breaking News
+  - Calm authority under pressure — like a hospital that is clean, organised,
+    and moving efficiently
+  - A trusted partner, not an alert machine
+
+The aesthetic target: somewhere between Apple Health (calm, personal, trusted)
+and Waze (real-time, spatial, action-oriented). Both are premium. Both are
+mobile-first. Neither screams at you.
+
+Premium is not expensive-looking. Premium is frictionless. Premium means
+every element has a reason to exist. Premium means white space is not empty —
+it is breathing room for the brain.
+
+================================================================================
+21.3 COLOUR SYSTEM — PSYCHOLOGICAL PRECISION
+================================================================================
+
+The v5/v6 primary red (#C0392B) is used everywhere. That is wrong.
+Red triggers threat response in the amygdala. If red is everywhere, the brain
+habituates to it and stops responding — OR it creates constant low-level stress
+in a platform the mother is supposed to check every day.
+
+The new colour system is tiered by psychological function.
+
+--------------------------------------------------------------------------------
+TIER 1 — BRAND COLOURS (Identity, not urgency)
+--------------------------------------------------------------------------------
+
+Siren Navy:       #1B2A4A   — Primary brand. Authority. Trust. Depth.
+                              Use for: logo, primary navigation, main headings,
+                              CTA buttons (primary actions), footer.
+                              Psychology: dark blues activate trust and
+                              competence associations. Used by insurance,
+                              banking, and security brands globally.
+
+Siren Amber:      #E8A020   — Secondary brand. Warmth. Lagos energy. Action.
+                              Use for: secondary CTAs, highlights, Guardian
+                              Mode accents, progress indicators.
+                              Psychology: amber/gold signals value and warmth
+                              without triggering threat response. Culturally
+                              resonant in Nigeria (gold = prosperity, care).
+
+Warm White:       #F8F7F5   — Background. Cream-white, not clinical white.
+                              Psychology: pure white (#FFFFFF) feels sterile
+                              and cold. Warm white feels safe and domestic —
+                              matches the mother's mental model of "home."
+
+Surface White:    #FFFFFF   — Cards only. Creates lift against #F8F7F5 bg.
+
+Deep Text:        #111827   — Primary text. Near-black, not pure black.
+                              Pure black on white creates harsh contrast that
+                              increases reading fatigue. #111827 is gentler.
+
+Body Text:        #374151   — Secondary text. All body copy.
+
+Muted Text:       #6B7280   — Timestamps, metadata, placeholders.
+
+Border:           #E5E7EB   — Subtle dividers. Never harsh lines.
+
+--------------------------------------------------------------------------------
+TIER 2 — STATUS COLOURS (Functional, not decorative)
+--------------------------------------------------------------------------------
+
+These colours ONLY appear on incident status badges, severity tags, and
+system state indicators. Never use them for decorative purposes.
+When the user sees these, they must always mean the same thing.
+
+Alert Red:        #DC2626   — CRITICAL severity. Active fire. Life threat.
+                              Animated pulse. Sparingly. Maximum impact.
+
+Warning Orange:   #EA580C   — HIGH severity. Serious but not life-critical.
+
+Caution Amber:    #D97706   — MEDIUM severity / VERIFYING status.
+
+Safe Green:       #16A34A   — RESOLVED / ARRIVED / SAFE / SUCCESS states.
+                              The colour of "it's okay." The mother needs to
+                              see this when incidents near her locations close.
+
+Trust Blue:       #2563EB   — VERIFIED status. Confirmed truth.
+                              Psychology: blue = factual, verified, credible.
+
+Purple:           #7C3AED   — AGENCY_NOTIFIED. Official involvement.
+
+Ghost Grey:       #9CA3AF   — REJECTED. Background. Non-threatening absence.
+
+--------------------------------------------------------------------------------
+TIER 3 — FEATURE IDENTITY COLOURS
+--------------------------------------------------------------------------------
+
+Guardian Teal:    #0D9488   — Guardian Mode. Watching. Protection. Calm.
+                              All Guardian Mode UI elements use this colour.
+                              Psychology: teal = watchful calm. Not alarming.
+                              Suggests surveillance in a protective sense.
+
+Commute Blue:     #0284C7   — Commute Shield. Movement. Route. Direction.
+                              All Commute Shield UI uses this colour.
+                              Psychology: blue = navigation, movement, sky.
+
+--------------------------------------------------------------------------------
+COLOUR USAGE RULES — NON-NEGOTIABLE
+--------------------------------------------------------------------------------
+
+1.  Alert Red (#DC2626) appears ONLY on CRITICAL incidents and the CRITICAL
+    severity badge. Never on buttons, never on headers, never on marketing copy.
+
+2.  Siren Navy (#1B2A4A) is the primary action colour. "Save location",
+    "Report incident", "Donate" buttons are all navy. Not red. Red is for
+    emergencies. Navy is for normal user actions.
+
+3.  Every status badge must use ONLY the Tier 2 colours. No custom one-offs.
+
+4.  Guardian Mode UI (Watch page, saved location cards, Guardian alerts)
+    uses Guardian Teal as its accent. Commute Shield uses Commute Blue.
+    This spatial colour coding means the mother learns: teal = my family,
+    blue = my route. Without reading.
+
+5.  Background is always #F8F7F5. Cards are always #FFFFFF.
+    Never invert this. Never use dark backgrounds on public pages.
+    (Dashboard can use dark sidebar — professionals, not anxious parents.)
+
+6.  White space is mandatory. Minimum 24px padding inside cards.
+    Minimum 16px between elements. Breathing room = calm brain.
+
+================================================================================
+21.4 TYPOGRAPHY SYSTEM — COGNITIVE LOAD REDUCTION
+================================================================================
+
+The goal: the mother should be able to understand any screen in under
+3 seconds without reading every word. This is achievable through type hierarchy.
+
+Font family: Inter (already specified). Why Inter:
+  - Designed for screen readability at all sizes
+  - High x-height = legible at small sizes on mobile
+  - Neutral personality = doesn't compete with content
+  - Used by Figma, Linear, Notion — premium-feeling in tech contexts
+
+--------------------------------------------------------------------------------
+TYPE SCALE (use ONLY these sizes — no deviations)
+--------------------------------------------------------------------------------
+
+Display:     48px / 600 weight  — Hero headlines only. One per page.
+H1:          32px / 700 weight  — Page titles. One per view.
+H2:          24px / 600 weight  — Section headers.
+H3:          18px / 600 weight  — Card titles, subsection headers.
+H4:          16px / 600 weight  — Label headings, form labels.
+Body Large:  16px / 400 weight  — Primary body copy.
+Body:        14px / 400 weight  — Secondary copy, descriptions.
+Caption:     12px / 400 weight  — Timestamps, metadata, helper text.
+Micro:       11px / 500 weight  — Badges only. Never body text.
+
+Line heights:
+  Display / H1: 1.2
+  H2 / H3:      1.3
+  Body:         1.6   (critical — tight line height causes reading fatigue)
+  Caption:      1.5
+
+Letter spacing:
+  Display / H1: -0.02em  (tighten large text — feels premium)
+  H4 / Labels:  +0.02em  (open small text — improves legibility)
+  Badges/Micro: +0.04em  (all-caps-style spacing)
+
+--------------------------------------------------------------------------------
+TYPOGRAPHY PSYCHOLOGY RULES
+--------------------------------------------------------------------------------
+
+1.  Headlines are PROMISES, not descriptions.
+    WRONG: "Location Subscription Management"
+    RIGHT: "Your family's locations"
+
+2.  CTAs are OUTCOMES, not actions.
+    WRONG: "Submit" / "Save" / "Continue"
+    RIGHT: "Start watching" / "Protect this location" / "I'm safe"
+
+3.  Status text must communicate IMPLICATION, not just state.
+    WRONG: "Status: VERIFIED"
+    RIGHT: "✓ Verified — responders are on their way"
+
+4.  Error messages must INSTRUCT, not blame.
+    WRONG: "Invalid file type"
+    RIGHT: "Please upload a JPG, PNG, or MP4 file"
+
+5.  Empty states must INVITE, not report absence.
+    WRONG: "No saved locations"
+    RIGHT: "Add your first location — Timi's school, Mama's compound,
+            your property — and we'll watch it for you."
+
+================================================================================
+21.5 SPATIAL DESIGN — VISUAL HIERARCHY & FITTS'S LAW
+================================================================================
+
+Fitts's Law: the time to tap a target is a function of its size and distance.
+On mobile, the most important action must be the largest and most central target.
+
+--------------------------------------------------------------------------------
+TAP TARGET MINIMUMS (mobile-first — this is WhatsApp country)
+--------------------------------------------------------------------------------
+
+Primary CTA button:   min 56px height, full width or min 200px
+Secondary button:     min 44px height
+Destructive actions:  min 44px height, never full width, never first
+Nav items:            min 48px height
+Map pins:             min 44px diameter (not 8px dots — untappable)
+Toggle switches:      min 51px wide × 31px high
+Checkbox/Radio:       min 24px × 24px hit area with 8px padding around
+
+NEVER place two primary actions next to each other at the same visual weight.
+The brain will stall (Hick's Law). Always have one dominant action per screen.
+
+--------------------------------------------------------------------------------
+GRID SYSTEM
+--------------------------------------------------------------------------------
+
+Mobile (default — design mobile first):
+  4-column grid / 16px gutters / 16px margins
+
+Tablet (768px+):
+  8-column grid / 24px gutters / 24px margins
+
+Desktop (1024px+):
+  12-column grid / 24px gutters / 80px margins (generous — premium feel)
+
+Max content width: 1200px. Centre everything above this.
+Never stretch text wider than 680px (reading comfort threshold).
+
+--------------------------------------------------------------------------------
+Z-AXIS (elevation) SYSTEM
+--------------------------------------------------------------------------------
+
+Elevation creates hierarchy. It tells the brain what matters most.
+Use box-shadow, not borders, to indicate elevation.
+
+Level 0 (flat):    Background elements, dividers
+  box-shadow: none
+
+Level 1 (raised):  Cards, input fields, nav bar
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06)
+
+Level 2 (floating): Dropdowns, tooltips, active cards
+  box-shadow: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06)
+
+Level 3 (overlay):  Modals, drawers, toast notifications
+  box-shadow: 0 20px 25px rgba(0,0,0,0.10), 0 10px 10px rgba(0,0,0,0.04)
+
+Level 4 (critical): CRITICAL incident alerts, emergency modals
+  box-shadow: 0 25px 50px rgba(220,38,38,0.15), 0 0 0 1px rgba(220,38,38,0.1)
+  (red tint in shadow — only for life-critical alerts)
+
+================================================================================
+21.6 MOTION & ANIMATION — NEUROLOGICAL IMPACT
+================================================================================
+
+The brain's visual cortex dedicates disproportionate resources to detecting
+motion. This is a survival mechanism (predators move). We use it deliberately.
+
+Motion carries meaning. Every animation in Siren.ng communicates a specific
+neurological signal.
+
+--------------------------------------------------------------------------------
+ANIMATION VOCABULARY
+--------------------------------------------------------------------------------
+
+PULSE (critical incidents):
+  A slow, rhythmic radial pulse on CRITICAL/HIGH severity pins.
+  2-second cycle. Subtle opacity fade (0.6 to 0 on the outer ring).
+  Neurological effect: triggers the peripheral motion detection system.
+    The user's eye is drawn to it without them choosing to look.
+  CSS:
+    @keyframes siren-pulse {
+      0%   { transform: scale(1);   opacity: 0.6; }
+      100% { transform: scale(2.5); opacity: 0;   }
+    }
+    animation: siren-pulse 2s ease-out infinite;
+
+  USE ONLY FOR: CRITICAL + HIGH severity incident pins on the map.
+  DO NOT USE FOR: UI loading states, decorative elements, anything non-urgent.
+
+FADE-IN (content loading):
+  200ms ease-out opacity fade. All content that appears after a data fetch.
+  Neurological effect: gradual appearance is less startling than pop-in.
+  Prevents the jarring "content shift" that causes loss of reading position.
+
+SLIDE-UP (bottom sheets, modals on mobile):
+  300ms cubic-bezier(0.32, 0.72, 0, 1). Slides up from below.
+  Neurological effect: matches the physical metaphor of "lifting" something.
+  More natural than a fade-in on mobile where content comes from the bottom.
+
+STATUS TRANSITION (incident status updates):
+  When status changes via WebSocket, the badge does NOT just swap text.
+  It: fades out (150ms) → pauses (50ms) → new status fades in (200ms).
+  Neurological effect: the pause gives the brain time to register that a
+  change occurred. Without it, users miss status updates entirely.
+
+PROGRESS PULSE (verifying state):
+  A gentle left-to-right shimmer on the VERIFYING status badge.
+  Signals: "Something is happening. The system is working."
+  Prevents the anxiety of "did my report go through?"
+  CSS: standard skeleton/shimmer animation, amber tinted.
+
+SUCCESS BLOOM (safe confirmation):
+  When reporter taps "I'm safe" or incident resolves near a saved location:
+  A brief radial bloom of Safe Green (#16A34A) from the tap point.
+  150ms in, 300ms hold, 300ms fade. Then the state updates.
+  Neurological effect: positive reinforcement loop. Closure. Relief.
+
+--------------------------------------------------------------------------------
+TIMING RULES
+--------------------------------------------------------------------------------
+
+Micro-interactions:  50-150ms   (button press feedback, toggle)
+State transitions:   200-300ms  (status changes, tab switches)
+Page transitions:    300-400ms  (route changes)
+Modals/drawers:      250-350ms  (open/close)
+Loading states:      immediate shimmer, max 3s before error state shown
+
+NEVER animate longer than 400ms for user-initiated actions.
+Slow animations feel broken. The brain interprets lag as system failure.
+
+Respect prefers-reduced-motion. All pulse/bloom animations must be
+disabled or replaced with static indicators for users with this setting.
+
+================================================================================
+21.7 COMPONENT PSYCHOLOGY — SPECIFIC UI PATTERNS
+================================================================================
+
+--------------------------------------------------------------------------------
+THE INCIDENT CARD (Feed, Dashboard, Track page)
+--------------------------------------------------------------------------------
+
+Information hierarchy on the card matches how the brain scans:
+  1. TOP LEFT:  Severity badge (colour-coded) — the amygdala reads colour
+                before text. She knows HIGH vs LOW before reading a word.
+  2. TOP RIGHT: Time ago — "4 minutes ago" vs "3 hours ago" is the first
+                question the brain asks about any threat.
+  3. CENTRE:    Incident type icon + name — large, clear, unambiguous icon.
+                No guessing. Fire = flame. Flood = wave. Collapse = building.
+  4. BELOW:     Zone name — one-word location. "Surulere". Not an address.
+  5. BOTTOM:    Status + vouch count + donation total.
+                Social proof (vouches) and community action (donations)
+                validate the incident without the user having to judge it alone.
+
+The card must communicate all critical information without requiring the
+user to expand it. Expansion is for engagement, not for necessity.
+
+Card minimum height: 100px. Maximum initial height: 160px. Never taller.
+
+--------------------------------------------------------------------------------
+THE SAVED LOCATION CARD (Watch page, My Impact)
+--------------------------------------------------------------------------------
+
+This card must feel OWNED and PERSONAL. It is the mother's proxy for her child.
+
+Design principles:
+  - Show the location type icon large and centred (school, home, land)
+  - Show the location NAME as the headline — her label, her words
+  - Show the safety score as a ring gauge (circular progress indicator)
+    Score 85-100: gauge fills in Guardian Teal — calm
+    Score 50-84:  gauge in Caution Amber — attention
+    Score 0-49:   gauge in Warning Orange — concern
+  - Show "X km radius being watched" below the score
+  - Last alert time: "Last alert: 3 days ago" (absence of alerts = good news)
+  - Status dot: pulsing teal dot when active, grey when paused
+
+The card must feel like a small guardian — alive, watchful, personal.
+Not a settings row. Not a database entry.
+
+--------------------------------------------------------------------------------
+THE TRACKING PAGE STATUS HERO
+--------------------------------------------------------------------------------
+
+This is the most important UI moment in the entire product.
+The reporter sent a WhatsApp message in fear. They clicked a link.
+This is what they see. Their cortisol is elevated. They need immediate
+resolution to that anxiety.
+
+The status hero must:
+  1. Fill minimum 40% of the viewport on mobile
+  2. Show the status in the largest text on the page (H1, minimum 32px)
+  3. Use colour to communicate state before the brain reads the text
+  4. Show a progress metaphor — either a timeline (steps completed) or
+     a linear progress bar across the top of the hero section
+  5. Update via WebSocket with the STATUS TRANSITION animation (see 21.6)
+  6. Show the human element: "Bola (Nurse) — 4 mins away"
+     The reporter's brain needs to know a human is responding.
+     Names reduce anxiety more than role titles alone.
+
+Status hero backgrounds (full-bleed, subtle gradient):
+  DETECTED/VERIFYING:  Warm gradient from #F8F7F5 to #FEF3C7 (amber tint)
+  VERIFIED/RESPONDING: Clean white — calm, clinical confidence
+  RESOLVED:            Very subtle green tint — #F0FDF4 — relief
+  REJECTED:            Clean white — no red — rejection is communicated
+                       by the text, not by alarming the user further
+
+--------------------------------------------------------------------------------
+THE DONATION SECTION
+--------------------------------------------------------------------------------
+
+Donations are driven by empathy activation. The brain donates when it
+can imagine a specific person being helped — not an abstract cause.
+
+Three fund cards must each show:
+  1. A human icon (not generic) — victim silhouette, responder helmet,
+     platform shield icon
+  2. A one-sentence story, not a description:
+     "Goes directly to the family who lost their home tonight."
+     "Split between the 2 responders who showed up in 4 minutes."
+     "Keeps this platform running for the next family who needs it."
+  3. Current donation total — social proof + progress momentum
+  4. Suggested amounts that anchor the user: ₦500 / ₦1,000 / ₦2,500 / ₦5,000
+     The middle option (₦1,000 or ₦2,500) should be visually highlighted.
+     Psychology: the brain defaults to the middle option when anchored
+     (compromise effect). The highlighted middle drives more ₦1,000–₦2,500
+     donations than a neutral list would.
+
+--------------------------------------------------------------------------------
+THE ONBOARDING / FIRST LOCATION SAVE FLOW
+--------------------------------------------------------------------------------
+
+This is the product's most important conversion moment.
+She arrives. She must save a location. The flow must feel effortless.
+
+Psychology: the Zeigarnik Effect says incomplete tasks stay active in memory
+and create mild discomfort until finished. Use a progress indicator (step 1
+of 5 visible) to activate this. She will feel a subconscious pull to complete.
+
+Step design rules:
+  - One question per screen. Never two.
+  - The question is large (H2). The input is large (full width).
+  - There is ONE button to proceed. Not "Next" and "Skip" and "Back."
+    Back arrow only — never a second CTA competing with the primary.
+  - Step indicator: 5 small dots, filled as she progresses. Nothing else.
+  - Minimum taps to complete: 5 (one per step). Currently specified as 6.
+    Reduce to 5 by combining notification method with confirmation.
+
+DO NOT show the word "account", "register", "sign up", or "profile" anywhere
+in this flow. She is NOT creating an account. She is protecting a location.
+Frame everything around the outcome, not the system mechanics.
+
+--------------------------------------------------------------------------------
+THE EMERGENCY REPORT FLOW
+--------------------------------------------------------------------------------
+
+The reporter is potentially witnessing an emergency. Their hands may be
+shaking. Cortisol is high. Fine motor control is reduced.
+
+This means:
+  - Step 1 (incident type): 7 large icon buttons, minimum 80px × 80px each
+    arranged in a 2-column grid. Icon + 1-word label. Nothing else.
+    She taps FIRE when she sees fire. One tap.
+  - Step 2 (location): "Use my location" button must be the ONLY primary
+    action. Full width. Prominent. Geolocation fills the field in 2 seconds.
+    Manual address entry is the fallback, not the default.
+  - Step 3 (describe): Textarea with a pulsing cursor and placeholder that
+    reduces cognitive load: "What are you seeing? (e.g. Smoke from 3rd floor
+    of the building opposite Total filling station)"
+    Give them a format. Don't make them invent one under stress.
+  - Step 4 (media): "Add a photo or video" — optional, clearly labelled
+    optional. Large tap target. Do NOT make her feel that she needs to have
+    evidence to report.
+  - Submit button: full width, Siren Navy, "Send report" — not "Submit."
+    "Send" is active. "Submit" is bureaucratic.
+
+After submit: immediate feedback. Do NOT show a loading spinner alone.
+Show: "Report received. Claude is verifying now. Usually takes 90 seconds."
+The brain needs to know the system received the input. Silence after
+submission creates doubt ("did it send?") which causes re-submissions.
+
+================================================================================
+21.8 INFORMATION ARCHITECTURE — REDUCING COGNITIVE LOAD
+================================================================================
+
+Miller's Law: working memory holds 7 ± 2 items at once.
+When designing any screen, count the number of decisions the user must make.
+If it exceeds 5, redesign.
+
+--------------------------------------------------------------------------------
+PROGRESSIVE DISCLOSURE
+--------------------------------------------------------------------------------
+
+Show only what is needed for the current decision. Hide complexity until
+the user signals they want more.
+
+In practice:
+  - Incident card in feed: shows 5 data points. Not 12.
+  - Track page initially: shows status, location, response timeline.
+    Resource board and donation section load below the fold — accessible
+    but not competing for attention with the primary job (status check).
+  - Watch page: Guardian Mode is visible first. Commute Shield is a section
+    below. Most users are mothers, not commuters. The commuter scrolls to
+    find their section. The mother doesn't need to scroll past it.
+  - Map filters: collapsed by default. "Filter" button reveals them.
+    An open filter bar adds 7 choices to every map view. That is 7 extra
+    decisions before the user can do anything useful.
+
+--------------------------------------------------------------------------------
+CHUNKING
+--------------------------------------------------------------------------------
+
+Related information must be visually grouped. The brain reads groups,
+not individual items. Ungrouped information feels overwhelming.
+
+The track page sections must be clearly chunked:
+  [STATUS HERO]
+  ─────────────────
+  [RESPONSE TIMELINE]
+  ─────────────────
+  [MEDIA GALLERY]      ← if media exists
+  ─────────────────
+  [RESOURCE BOARD]     ← after VERIFIED
+  ─────────────────
+  [DONATION SECTION]   ← after VERIFIED
+
+Each chunk has a clear header (H3, Siren Navy) and a visible divider.
+The divider is not a harsh line — it is 24px whitespace + a subtle 1px
+#E5E7EB rule. The brain reads the whitespace as a boundary.
+
+--------------------------------------------------------------------------------
+THE EMPTY STATE PROTOCOL
+--------------------------------------------------------------------------------
+
+Empty states are moments of maximum user vulnerability on a new platform.
+The user just arrived. They have nothing yet. The empty state is the first
+impression of the product's value.
+
+Rule: every empty state must show:
+  1. An illustration (not an icon — an illustration implies a story)
+  2. A headline framed as an invitation: "Nothing here yet — let's fix that"
+  3. A single CTA that directly creates value: "Save your first location"
+  4. One example of what it looks like when populated (ghost/dimmed preview)
+
+The ghost preview is critical for new platforms. The user cannot imagine
+what a saved location card looks like if they've never seen one. Show them
+a dimmed, realistic version. The brain fills in the rest.
+
+================================================================================
+21.9 TRUST ARCHITECTURE — HOW WE BUILD CREDIBILITY ON A NEW PLATFORM
+================================================================================
+
+A new platform has no earned trust. Every pixel must work to build it.
+The mother will not save her child's school location on a platform she
+does not trust. Trust is the product. Everything else is a feature.
+
+--------------------------------------------------------------------------------
+TRUST SIGNALS — ORDERED BY IMPACT
+--------------------------------------------------------------------------------
+
+1. REAL NUMBERS, LIVE:
+   "2,341 families protected this month" is worth more than any marketing copy.
+   These must be live (from the API), not static. She will check if they change.
+   Display prominently on the home page. Update via polling every 60 seconds.
+
+2. RESPONSE TIME PROOF:
+   "Average response: 6 minutes, 12 seconds"
+   Real precision (not "under 10 minutes") signals real data. Round numbers
+   feel estimated. Precise numbers feel measured. Measured = trustworthy.
+
+3. INCIDENT CLOSURE VISIBILITY:
+   Every resolved incident on the feed must show its resolution details.
+   "Resolved in 18 minutes — 2 responders, ₦32,000 raised"
+   The history of things working is the strongest possible trust signal.
+
+4. VERIFICATION BADGE:
+   Every incident that passed AI verification shows a small "✓ AI Verified"
+   badge. This signals: the platform has a filter. Not everything gets through.
+   That filter is what she is trusting when she acts on an alert.
+
+5. PRIVACY PROOF:
+   In the Watch page, above the location form: a single line:
+   "Your location data is stored encrypted. Only you can see your saved locations."
+   Not a link to a privacy policy. A plain-language statement, right here.
+   The brain registers this as a promise, not a legal disclaimer.
+
+6. RESPONDER PROFILES:
+   On the track page, responder initials + skill badge (not full name — privacy).
+   "B.A. (Nurse) — accepted in 47 seconds"
+   Real people. Real credentials. Real response times.
+   The mother needs to know a human is coming, not just "a responder."
+
+7. CONSISTENT VISUAL QUALITY:
+   A platform that looks expensive signals that someone cared enough to invest
+   in it. Consistent spacing, premium typography, high-quality icons, smooth
+   animations — all of these are subconscious trust signals.
+   A pixelated icon or a misaligned button costs platform credibility.
+
+--------------------------------------------------------------------------------
+SOCIAL PROOF PLACEMENT
+--------------------------------------------------------------------------------
+
+The home page must show social proof in three positions:
+
+Position 1 (hero section): Live counter of families/incidents protected.
+  "Protecting 2,341 Lagos families right now"
+
+Position 2 (mid-page): Zone grid with real incident counts per area.
+  Shows the platform is active in real neighbourhoods she recognises.
+
+Position 3 (bottom): Resolved incident ticker.
+  "Fire at Surulere — Resolved in 11 mins — 3 responders — ₦45K raised"
+  Recent, specific, real. Not testimonials. Outcomes.
+
+================================================================================
+21.10 MOBILE-FIRST INTERACTION PATTERNS
+================================================================================
+
+96% of this platform's traffic will be on mobile. WhatsApp users = mobile users.
+The desktop experience is secondary. Design mobile first, adapt upward.
+
+--------------------------------------------------------------------------------
+THUMB ZONE (the most important concept in mobile UX)
+--------------------------------------------------------------------------------
+
+The human thumb reaches comfortably to the bottom 60% of the screen on a
+standard phone. The top 25% is the thumb's dead zone — hard to reach without
+shifting hand grip.
+
+Rules:
+  - Primary CTA: always bottom 60% of screen. Never top.
+  - Navigation: bottom nav bar (5 items max). Not hamburger menu.
+    The mother navigating with one hand while holding a bag cannot
+    tap a hamburger icon at the top left reliably.
+  - Destructive actions (delete, stop alerts): deliberately placed in
+    thumb-uncomfortable positions (top right or second-level menu).
+    Not inaccessible — just not accidentally tappable.
+
+Bottom navigation structure:
+  [ Home ]  [ Map ]  [ Report ]  [ Watch ]  [ Profile ]
+  Home = dashboard / live feed
+  Report = immediate incident reporting (this is the emergency action)
+  The Report tab is the CENTRE tab — this is not an accident.
+  The centre position is the easiest thumb reach from any position.
+
+--------------------------------------------------------------------------------
+SWIPE PATTERNS
+--------------------------------------------------------------------------------
+
+Swipe left on incident card: reveal secondary actions (share, vouch)
+  Do NOT show delete on swipe — the public feed is not the user's content.
+
+Swipe up on track page: natural scroll through sections
+  Do NOT use horizontal tabs for track page sections — scrolling is more
+  natural on mobile and does not hide content behind a tap interaction.
+
+Pull-to-refresh on feed and map: standard, expected, use it.
+
+--------------------------------------------------------------------------------
+KEYBOARD AND INPUT
+--------------------------------------------------------------------------------
+
+All text inputs must:
+  - Show the right keyboard type: phone fields use tel, search uses search,
+    location address uses text with autocomplete, amount fields use number.
+  - Auto-focus the first field when a form appears.
+  - Never scroll behind the keyboard when it appears.
+    Use paddingBottom = keyboardHeight to push content up.
+
+Number inputs (donation amounts):
+  - Show a numeric keyboard
+  - Format the number as the user types: "5000" → "₦5,000"
+  - The ₦ symbol appears automatically — she should not type it
+
+================================================================================
+21.11 ICONOGRAPHY SYSTEM
+================================================================================
+
+Icons are a precision tool for reducing cognitive load. One good icon
+removes the need for one label. Used correctly, they make the interface
+faster to parse. Used incorrectly, they add a decoding step.
+
+Rules:
+  - Every icon must be universally understood OR accompanied by a label.
+    If in doubt, show both. Never icon-only for critical actions on first use.
+  - Incident type icons must be unambiguous in silhouette:
+      FIRE:      flame (not a candle, not a lighter)
+      FLOOD:     house half-submerged in water
+      COLLAPSE:  building with crack/crumble
+      RTA:       two cars colliding (not a single car)
+      EXPLOSION: starburst/blast radius shape
+      DROWNING:  person in water, arm raised
+      HAZARD:    power line with spark / triangle warning with bolt
+  - These icons must be custom, not stock library icons.
+    Stock icons for emergencies are often ambiguous. Invest in custom SVGs.
+  - Location type icons (for saved locations):
+      HOME:   house
+      SCHOOL: graduation cap or building with flag
+      LAND:   land/plot outline with marker
+      OFFICE: building/briefcase
+      FAMILY: person with smaller person (adult + child)
+  - All icons: 24px × 24px in body context, 32px × 32px in card headers,
+    48px × 48px in feature illustrations, 80px × 80px in report step buttons.
+
+Icon weight: use a consistent stroke weight across all icons. 1.5px stroke
+at 24px size. Mixing weights creates visual noise and subconscious discomfort.
+
+================================================================================
+21.12 ERROR STATES & SYSTEM FEEDBACK
+================================================================================
+
+How a platform handles errors is when trust is most at stake.
+An error during an emergency report could be the difference between
+someone getting help and not. Every error state is a critical UX moment.
+
+--------------------------------------------------------------------------------
+ERROR HIERARCHY
+--------------------------------------------------------------------------------
+
+Level 1 — Field validation (inline, immediate):
+  Show below the field as the user types. Not in a toast. Not in a modal.
+  Red text (#DC2626), 12px, with a specific instruction.
+  "Please enter a phone number in the format 0801 234 5678"
+  Appears as soon as field loses focus (not on submit).
+
+Level 2 — Form submission failure (inline banner):
+  Red banner above the form. Specific about which fields failed.
+  "We couldn't save your location — please check your internet connection
+   and try again."
+  With a "Try again" button inline. Not a page refresh.
+
+Level 3 — Network failure (toast):
+  Bottom-of-screen toast. 4-second display. Auto-dismiss.
+  "No connection — we'll retry when you're back online."
+  Icon: no-wifi icon.
+  DO NOT show error toasts that require the user to dismiss them.
+  Requiring dismissal of a non-critical error interrupts the task flow.
+
+Level 4 — Critical failure (modal):
+  Only for: payment failures, incident submission failures.
+  Full modal with clear headline, explanation, and ONE next step.
+  "Your report didn't go through — tap below to try again, or send
+   a WhatsApp message to our number directly."
+  Gives a fallback. Never a dead end.
+
+Level 5 — Service unavailable (full page):
+  Clean, branded error page. Not a white screen.
+  "Siren is temporarily unavailable — we're working on it.
+   For urgent emergencies: call 767 (LASEMA) or 112."
+  Always provide a manual fallback for safety-critical products.
+
+--------------------------------------------------------------------------------
+LOADING STATES
+--------------------------------------------------------------------------------
+
+Every data fetch must show a skeleton screen, not a spinner.
+Skeleton screens match the layout of the content that will load.
+This reduces perceived loading time by 20-40% (the brain fills in the content
+before it arrives, reducing the sense of waiting).
+
+Incident feed skeleton: 3 incident card-shaped shimmer blocks.
+Map loading skeleton: grey map background with a central location marker pulse.
+Track page skeleton: status hero block + timeline block outlines.
+
+No spinner should ever be the only indication that something is loading.
+Spinners provide no information about progress. They increase anxiety.
+Use skeleton screens. On long operations (>3s), show a progress bar with
+text: "Verifying with AI... usually takes about 60 seconds."
+
+================================================================================
+21.13 NOTIFICATION DESIGN (in-app)
+================================================================================
+
+In-app notifications appear at the top of the screen (not the bottom —
+bottom is for toasts). They persist until dismissed or replaced.
+
+--------------------------------------------------------------------------------
+GUARDIAN ALERT (in-app, if user has the site open)
+--------------------------------------------------------------------------------
+
+Full-width banner below the top nav. Not a modal — does not block the screen.
+Red left border (4px, Alert Red #DC2626) for CRITICAL/HIGH.
+Amber left border for MEDIUM.
+Contains:
+  - Severity badge (colour-coded, 12px)
+  - Incident type + location: "FIRE — Surulere, 0.4km from Timi school"
+  - "View" button (right-aligned)
+  - Dismiss X (top right)
+  - Auto-dismisses after 8 seconds if not interacted with
+
+The banner slides DOWN from below the nav (not from the top edge of screen).
+Sliding down feels like it is being delivered to you.
+Sliding in from the side feels like a notification — fine for social apps,
+too casual for emergency alerts.
+
+--------------------------------------------------------------------------------
+COMMUTE ALERT (in-app)
+--------------------------------------------------------------------------------
+
+Same structure as Guardian alert but with Commute Blue (#0284C7) left border.
+Additional line below location: "On your Ojota → Ikeja corridor"
+This spatial reference (the route name she named herself) connects the
+abstract incident to her personal situation instantly.
+
+================================================================================
+21.14 ACCESSIBILITY AS A TRUST SIGNAL
+================================================================================
+
+Accessibility is not just compliance. For Siren.ng, it is a trust signal.
+A platform that works for everyone communicates that it is professionally built.
+
+Minimum requirements:
+  - All text must meet WCAG AA contrast ratio (4.5:1 for body, 3:1 for large)
+  - All interactive elements must have visible focus states (2px navy outline)
+  - All images must have descriptive alt text (not "image" — "Photo of fire
+    at building on Adewale Street Surulere, shared by incident reporter")
+  - All form inputs must have associated labels (not just placeholders)
+  - Font size must never go below 12px (captions). Body text minimum 14px.
+  - Incident type icons must not rely on colour alone — always include label
+    (a colour-blind user cannot distinguish red fire from orange flood by colour)
+
+================================================================================
+21.15 IMPLEMENTATION PRIORITY ORDER
+================================================================================
+
+Apply these in order. Do not apply section 3 before section 1.
+
+Priority 1 (core trust — build these before any new feature):
+  - New colour system (Section 21.3) applied across all components
+  - Typography hierarchy (Section 21.4) applied globally
+  - Tap target sizing (Section 21.5) corrected on all interactive elements
+  - Bottom navigation pattern (Section 21.10) replacing any top nav on mobile
+
+Priority 2 (emotional connection):
+  - Saved location card redesign (Section 21.7)
+  - Status hero redesign on track page (Section 21.7)
+  - Empty state illustrations and copy (Section 21.8)
+  - Trust signal placement on home page (Section 21.9)
+
+Priority 3 (conversion and engagement):
+  - Animation system (Section 21.6) — pulse, fade, bloom
+  - Donation section anchoring (Section 21.7)
+  - Report flow UX copy updates (Section 21.7)
+  - Skeleton screens on all data-fetching views (Section 21.12)
+
+Priority 4 (polish):
+  - Error state hierarchy (Section 21.12)
+  - In-app notification banners (Section 21.13)
+  - Accessibility audit (Section 21.14)
+  - Icon audit + replacement with custom SVGs (Section 21.11)
+
+================================================================================
+SUMMARY: THE 10 UNBREAKABLE DESIGN LAWS FOR SIREN.NG
+================================================================================
+
+1.  Red is for emergencies only. Navy is for normal actions.
+2.  One primary action per screen. Never two CTAs at the same weight.
+3.  Tap targets are minimum 44px. On primary CTAs, 56px.
+4.  Status must be understood in 3 seconds without reading.
+5.  Empty states invite action — they never just report absence.
+6.  Errors always give a specific next step. Never dead ends.
+7.  Every save/submit gives immediate confirmation before anything else.
+8.  All CTAs are outcomes ("Protect this location"), not actions ("Save").
+9.  Mobile is the default. Desktop is the adaptation.
+10. The mother's anxiety must reduce, not increase, from the moment she opens
+    the app to the moment she closes it. If it increases, the design failed.
+
+================================================================================
+END OF SECTION 21
+================================================================================
+This section is a LIVING document. Update it when new ICP research is
+available, when A/B test results change a principle, or when the platform
+expands to new user segments. Every update must be traceable to a
+neurological or behavioural principle — not a personal preference.
+================================================================================
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+Siren.ng BRD v6 — March 2026
+Guardian & Commute Shield + Media Upload + WhatsApp Integration Page +
+UI/UX Psychology & Premium Design System
+Python 3.13 + Django 5.1 + psycopg3 + Supabase PostgreSQL + React +
+WhatsApp + Claude AI + Paystack
+Phases 1–7: COMPLETE. Live on Railway.
+================================================================================

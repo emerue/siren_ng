@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
 import { getOrganisationsMap } from '../api'
 import type { Organisation } from '../types'
+import Nav from '../components/Nav'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -31,10 +31,7 @@ export default function OrgsPage() {
 
   return (
     <div className="min-h-screen bg-bg font-sans">
-      <div className="bg-white border-b border-border px-6 py-4 flex items-center gap-4">
-        <Link to="/" className="font-bold text-primary text-lg">🚨 Siren.ng</Link>
-        <span className="text-textBody">Verified Partners</span>
-      </div>
+      <Nav />
 
       {/* Map */}
       <div style={{ height: 280 }}>

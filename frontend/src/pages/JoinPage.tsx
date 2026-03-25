@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import Nav from '../components/Nav'
 import { useMutation } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
@@ -466,10 +466,10 @@ export default function JoinPage() {
 
   return (
     <div className="min-h-screen bg-bg font-sans">
-      <div className="bg-primary text-white px-6 py-4 flex items-center gap-3">
-        <Link to="/" className="font-bold text-lg">🚨 Siren.ng</Link>
-        <span className="text-white/60">/</span>
-        <span className="text-white/80">Join</span>
+      <Nav />
+      <div className="bg-white border-b border-border px-6 py-4">
+        <h1 className="font-bold text-lg text-textPrimary">Join Siren</h1>
+        <p className="text-textMuted text-sm">Register as a responder or verified organisation</p>
       </div>
 
       <div className="max-w-5xl mx-auto px-4 py-12">

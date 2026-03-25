@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { createSubscription, getSubscriptions, updateSubscription, deleteSubscription } from '../api'
 import type { LocationSubscription } from '../types'
 import { createHash } from '../utils/hash'
+import Nav from '../components/Nav'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -12,8 +14,6 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
-
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '+2349000000000'
 
 function PinPicker({ onSelect }: { onSelect: (lat: number, lng: number) => void }) {
   useMapEvents({ click(e) { onSelect(e.latlng.lat, e.latlng.lng) } })
@@ -142,29 +142,16 @@ export default function WatchPage() {
 
   return (
     <div className="min-h-screen bg-bg font-sans">
-      <div className="bg-primary text-white px-6 py-4">
-        <h1 className="font-bold text-lg">Location Watch</h1>
-        <p className="text-white/80 text-sm">Get WhatsApp alerts when emergencies happen near places you care about</p>
+      <Nav />
+      <div className="bg-white border-b border-border px-6 py-4">
+        <h1 className="font-bold text-lg text-textPrimary">Watch Locations</h1>
+        <p className="text-textMuted text-sm">Get instant alerts when emergencies happen near places you care about</p>
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
-        {/* WhatsApp CTA */}
-        <div className="bg-white rounded-xl border border-border p-5">
-          <h3 className="font-bold mb-2">Quickest way — via WhatsApp</h3>
-          <p className="text-textBody text-sm mb-3">
-            Send WATCH to Siren and follow the guided setup. Takes about 1 minute.
-          </p>
-          <a
-            href={`https://wa.me/${WHATSAPP_NUMBER.replace('+', '')}?text=WATCH`}
-            className="inline-block bg-primary text-white px-6 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 transition"
-          >
-            Send WATCH to Siren
-          </a>
-        </div>
-
         {/* Web form */}
         <div className="bg-white rounded-xl border border-border p-5">
-          <h3 className="font-bold mb-4">Or use the web form</h3>
+          <h3 className="font-bold mb-4">Save a location to watch</h3>
 
           <input
             value={form.whatsapp_number}
@@ -288,15 +275,14 @@ export default function WatchPage() {
             Get alerts when incidents block your daily route. Monitors your Home to Office corridor
             during peak hours (6–10am and 4–8pm).
           </p>
-          <a
-            href={`https://wa.me/${WHATSAPP_NUMBER.replace('+', '')}?text=WATCH`}
-            className="inline-block bg-primary text-white px-6 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 transition mb-4"
-          >
-            Set up via WhatsApp (fastest)
-          </a>
-          <p className="text-textMuted text-xs mb-3">Or use the web form below to set home + office pins:</p>
           <CommuteForm />
         </div>
+
+        {/* WhatsApp footnote */}
+        <p className="text-textMuted text-xs text-center pb-4">
+          Prefer WhatsApp? You can also manage locations via Siren on WhatsApp.{' '}
+          <Link to="/connect" className="text-green-700 hover:underline">Connect WhatsApp →</Link>
+        </p>
       </div>
     </div>
   )

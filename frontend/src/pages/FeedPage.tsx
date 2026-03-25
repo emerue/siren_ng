@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Nav from '../components/Nav'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
@@ -39,10 +40,7 @@ export default function FeedPage() {
 
   return (
     <div className="min-h-screen bg-bg font-sans">
-      <div className="bg-white border-b border-border px-6 py-4 flex items-center gap-4">
-        <Link to="/" className="font-bold text-primary text-lg">🚨 Siren.ng</Link>
-        <span className="text-textBody">Incident Feed</span>
-      </div>
+      <Nav />
 
       {/* Filters */}
       <div className="max-w-2xl mx-auto px-4 py-4 flex flex-wrap gap-2">

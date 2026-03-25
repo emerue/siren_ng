@@ -14,12 +14,12 @@ channels-redis==4.2
 daphne==4.1
 anthropic
 twilio==9.3
-cloudinary
-django-cloudinary-storage
+supabase
+Pillow
+python-magic
 django-celery-beat==2.7
 requests
 gunicorn==22.0.0
-# setuptools pinned at top
 pytz
 
 groq

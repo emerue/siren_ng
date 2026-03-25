@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Nav from '../components/Nav'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
@@ -6,7 +7,7 @@ import L from 'leaflet'
 import { formatDistanceToNow } from 'date-fns'
 import { getIncident, getResources, getDonationSummary, vouchIncident, suggestResource, claimResource } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
-import type { Incident, ResourceItem, DonationSummary } from '../types'
+import type { Incident, ResourceItem, DonationSummary, IncidentMedia } from '../types'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -56,6 +57,67 @@ function ResourceStatusBadge({ status }: { status: string }) {
     <span className={`text-xs font-semibold px-2 py-0.5 rounded ${map[status] || ''}`}>
       {status}
     </span>
+  )
+}
+
+function MediaGallery({ media }: { media: IncidentMedia[] }) {
+  const [lightbox, setLightbox] = useState<IncidentMedia | null>(null)
+
+  if (media.length === 0) return null
+
+  return (
+    <div className="bg-white rounded-xl border border-border p-4">
+      <h3 className="font-semibold text-textPrimary mb-3">
+        Evidence · {media.length} file{media.length !== 1 ? 's' : ''}
+      </h3>
+      <div className="grid grid-cols-3 gap-2">
+        {media.map((m) => (
+          <button
+            key={m.id}
+            onClick={() => m.media_type === 'image' && setLightbox(m)}
+            className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 group"
+          >
+            {m.media_type === 'image' ? (
+              <img
+                src={m.public_url}
+                alt=""
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 text-white">
+                <span className="text-3xl mb-1">▶</span>
+                <span className="text-xs opacity-70">Video</span>
+              </div>
+            )}
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition" />
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-textMuted mt-2">
+        Tap an image to enlarge · Files are visible to responders and admins only.
+      </p>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white text-3xl w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full"
+            onClick={() => setLightbox(null)}
+          >
+            ×
+          </button>
+          <img
+            src={lightbox.public_url}
+            alt=""
+            className="max-w-full max-h-full rounded-lg shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -127,16 +189,13 @@ export default function TrackPage() {
   if (!incident) return <div className="flex items-center justify-center h-screen text-textMuted">Incident not found.</div>
 
   const showResourceBoard = ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status)
+  const mediaItems: IncidentMedia[] = incident.media ?? []
 
   return (
     <div className="min-h-screen bg-bg font-sans">
-      {/* Header */}
-      <div className="bg-primary text-white px-6 py-4 flex items-center justify-between">
-        <Link to="/" className="font-bold text-lg">Siren.ng</Link>
-        <span className="text-sm opacity-80">Your report is being tracked</span>
-      </div>
+      <Nav />
 
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
         {/* Status */}
         <div className="bg-white rounded-xl border border-border p-6 text-center">
           <div className="text-4xl mb-3">
@@ -155,13 +214,13 @@ export default function TrackPage() {
             <button
               onClick={() => vouchMut.mutate()}
               disabled={vouchMut.isPending}
-              className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50"
+              className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition"
             >
               Vouch ({incident.vouch_count})
             </button>
             <button
-              onClick={() => navigator.clipboard.writeText(window.location.href)}
-              className="border border-border px-4 py-2 rounded-lg text-sm hover:border-primary"
+              onClick={() => { navigator.clipboard.writeText(window.location.href) }}
+              className="border border-border px-4 py-2 rounded-lg text-sm hover:border-primary transition"
             >
               Share
             </button>
@@ -169,7 +228,7 @@ export default function TrackPage() {
         </div>
 
         {fromCommute && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
             <p className="text-amber-800 font-semibold text-sm">
               This incident is on your saved commute route.
             </p>
@@ -179,8 +238,11 @@ export default function TrackPage() {
         {/* Description */}
         <div className="bg-white rounded-xl border border-border p-4">
           <h3 className="font-semibold text-textPrimary mb-2">Report</h3>
-          <p className="text-textBody text-sm">{incident.description}</p>
+          <p className="text-textBody text-sm leading-relaxed">{incident.description}</p>
         </div>
+
+        {/* Media gallery */}
+        {mediaItems.length > 0 && <MediaGallery media={mediaItems} />}
 
         {/* Map */}
         {incident.location_lat && incident.location_lng && (

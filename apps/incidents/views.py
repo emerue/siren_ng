@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db.models import Count
 from django.db.models.functions import ExtractYear
@@ -237,7 +237,7 @@ def zone_history(request):
     if not zone_name:
         return Response({"error": "zone_name is required"}, status=400)
 
-    since_2010 = datetime(2010, 1, 1, tzinfo=timezone.utc)
+    since_2010 = datetime(2010, 1, 1, tzinfo=dt_timezone.utc)
     now = timezone.now()
 
     qs = Incident.objects.filter(
@@ -317,7 +317,7 @@ def zone_history(request):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def zone_stats(request):
-    since_2010 = datetime(2010, 1, 1, tzinfo=timezone.utc)
+    since_2010 = datetime(2010, 1, 1, tzinfo=dt_timezone.utc)
     rows = (
         Incident.objects.filter(status="RESOLVED", created_at__gte=since_2010)
         .values("zone_name")

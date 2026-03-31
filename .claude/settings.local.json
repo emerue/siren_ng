@@ -21,7 +21,10 @@
       "Bash(do echo \"=== $f ===\")",
       "Read(//c/Users/JudeEmerue/Downloads/vscode/siren_ng/**)",
       "Bash(done)",
-      "Bash(for f in frontend/src/pages/MapPage.tsx frontend/src/pages/FeedPage.tsx frontend/src/pages/OrgsPage.tsx frontend/src/pages/DonatePage.tsx)"
+      "Bash(for f in frontend/src/pages/MapPage.tsx frontend/src/pages/FeedPage.tsx frontend/src/pages/OrgsPage.tsx frontend/src/pages/DonatePage.tsx)",
+      "Bash(mkdir:*)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(ls:*)"
     ]
   }
 }

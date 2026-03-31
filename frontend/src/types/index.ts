@@ -194,3 +194,15 @@ export interface SubscriptionAlert {
   sent_at: string
   delivered: boolean
 }
+
+export interface ZoneHistory {
+  zone_name: string
+  total_incidents: number
+  by_type: Record<string, number>
+  by_year: Array<{ year: number; count: number }>
+  resolution_rate: number
+  avg_resolution_minutes: number | null
+  trend: 'improving' | 'stable' | 'increasing'
+  zone_score: number
+  recent_5: Incident[]
+}

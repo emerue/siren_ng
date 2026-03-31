@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { getActiveIncidents, getIncidents } from '../api'
+import { getActiveIncidents, getIncidents, getZoneStats, getHistoricalIncidents } from '../api'
 import type { Incident } from '../types'
 import Nav from '../components/Nav'
 import { formatDistanceToNow } from 'date-fns'
@@ -49,6 +49,21 @@ export default function HomePage() {
     refetchInterval: 60_000,
   })
   const resolved: Incident[] = resolvedData?.results || []
+
+  // Zone historical counts — powers the "Documented since 2010" line per zone card
+  const { data: zoneStats = {} } = useQuery<Record<string, number>>({
+    queryKey: ['zone-stats'],
+    queryFn: getZoneStats,
+    staleTime: 10 * 60 * 1000,
+  })
+
+  // A few historical entries to mix into the resolved ticker
+  const { data: histData } = useQuery({
+    queryKey: ['home-historical'],
+    queryFn: () => getHistoricalIncidents({ page_size: '4' }),
+    staleTime: 10 * 60 * 1000,
+  })
+  const historicalEntries: Incident[] = histData?.results || []
 
   return (
     <div className="min-h-screen bg-bg font-sans">
@@ -138,14 +153,16 @@ export default function HomePage() {
         </div>
       </section>
 
-
-
       {/* Lagos zones */}
       <section className="py-12 px-6 max-w-5xl mx-auto">
         <h2 className="text-xl font-bold mb-5 text-textPrimary">Active Zones</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {ZONES.map((zone) => {
             const count = activeIncidents.filter(i => i.zone_name?.toLowerCase().includes(zone.toLowerCase())).length
+            // Sum historical from all matching zone stat keys
+            const histCount = Object.entries(zoneStats)
+              .filter(([k]) => k.toLowerCase().includes(zone.toLowerCase()) || zone.toLowerCase().includes(k.toLowerCase()))
+              .reduce((sum, [, v]) => sum + v, 0)
             return (
               <Link
                 key={zone}
@@ -157,14 +174,19 @@ export default function HomePage() {
                   ? <div className="text-xs text-primary font-medium mt-1">{count} active 🔴</div>
                   : <div className="text-xs text-green-600 mt-1">All clear ✓</div>
                 }
+                {histCount > 0 && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    Documented since 2010: {histCount}
+                  </div>
+                )}
               </Link>
             )
           })}
         </div>
       </section>
 
-      {/* Recently resolved */}
-      {resolved.length > 0 && (
+      {/* Recently resolved + historical entries */}
+      {(resolved.length > 0 || historicalEntries.length > 0) && (
         <section className="py-8 px-6 max-w-5xl mx-auto">
           <h2 className="text-xl font-bold mb-5 text-textPrimary">Recently Resolved</h2>
           <div className="space-y-2.5">
@@ -184,6 +206,26 @@ export default function HomePage() {
                 </div>
                 <StatusBadge status={inc.status} />
               </Link>
+            ))}
+
+            {/* Historical entries — grey left border, no donations */}
+            {historicalEntries.map((inc) => (
+              <div
+                key={`h-${inc.id}`}
+                className="flex items-center gap-3 bg-gray-50 rounded-xl p-4"
+                style={{ borderLeft: '3px solid #9CA3AF', border: '1px solid #E5E7EB', borderLeftWidth: '3px', borderLeftColor: '#9CA3AF', borderLeftStyle: 'solid' }}
+              >
+                <span className="text-xl opacity-60">{TYPE_ICON[inc.incident_type] || '🚨'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-700 text-sm">{inc.incident_type} — {inc.zone_name}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {new Date(inc.created_at).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })}
+                  </p>
+                </div>
+                <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: '#E5E7EB', color: '#6B7280' }}>
+                  HISTORICAL
+                </span>
+              </div>
             ))}
           </div>
         </section>

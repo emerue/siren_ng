@@ -12,4 +12,6 @@ urlpatterns = [
     path('<uuid:pk>/media/', views.upload_media, name='incident-media-upload'),
     path('<uuid:pk>/media/list/', views.list_media, name='incident-media-list'),
     path('<uuid:pk>/media/<int:media_pk>/', views.delete_media, name='incident-media-delete'),
+    path('zone-history/', views.zone_history, name='incident-zone-history'),
+    path('zone-stats/', views.zone_stats, name='incident-zone-stats'),
 ]

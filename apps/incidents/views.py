@@ -1,6 +1,9 @@
 import hashlib
 import logging
+from datetime import datetime, timedelta
 
+from django.db.models import Count
+from django.db.models.functions import ExtractYear
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
@@ -35,17 +38,32 @@ class IncidentListView(generics.ListAPIView):
     pagination_class = IncidentPagination
 
     def get_queryset(self):
-        qs = Incident.objects.filter(
-            status__in=["VERIFIED", "RESPONDING", "AGENCY_NOTIFIED", "RESOLVED"]
-        )
+        cutoff = timezone.now() - timedelta(days=30)
+        historical = self.request.query_params.get("historical")
+
+        if historical == "true":
+            # Only old resolved incidents (seeded/historical data)
+            qs = Incident.objects.filter(status="RESOLVED", created_at__lt=cutoff)
+        else:
+            qs = Incident.objects.filter(
+                status__in=["VERIFIED", "RESPONDING", "AGENCY_NOTIFIED", "RESOLVED"]
+            )
+            if historical == "false":
+                # Exclude old resolved - live feed only
+                qs = qs.exclude(status="RESOLVED", created_at__lt=cutoff)
+
         if zone := self.request.query_params.get("zone_name"):
-            qs = qs.filter(zone_name=zone)
+            qs = qs.filter(zone_name__icontains=zone)
         if s := self.request.query_params.get("status"):
             qs = qs.filter(status=s)
         if t := self.request.query_params.get("incident_type"):
             qs = qs.filter(incident_type=t)
         if sev := self.request.query_params.get("severity"):
             qs = qs.filter(severity=sev)
+        if yr_from := self.request.query_params.get("year_from"):
+            qs = qs.filter(created_at__year__gte=int(yr_from))
+        if yr_to := self.request.query_params.get("year_to"):
+            qs = qs.filter(created_at__year__lte=int(yr_to))
         return qs
 
 
@@ -208,3 +226,102 @@ def delete_media(request, pk, media_pk):
 
     media.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# -- Historical analytics views ------------------------------------------------
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def zone_history(request):
+    zone_name = request.query_params.get("zone_name", "").strip()
+    if not zone_name:
+        return Response({"error": "zone_name is required"}, status=400)
+
+    since_2010 = datetime(2010, 1, 1, tzinfo=timezone.utc)
+    now = timezone.now()
+
+    qs = Incident.objects.filter(
+        zone_name__icontains=zone_name,
+        status="RESOLVED",
+        created_at__gte=since_2010,
+    )
+
+    total = qs.count()
+
+    by_type = {}
+    for row in qs.values("incident_type").annotate(cnt=Count("id")).order_by("-cnt"):
+        by_type[row["incident_type"]] = row["cnt"]
+
+    by_year_qs = (
+        qs.annotate(year=ExtractYear("created_at"))
+        .values("year")
+        .annotate(cnt=Count("id"))
+        .order_by("year")
+    )
+    by_year = [{"year": r["year"], "count": r["cnt"]} for r in by_year_qs]
+
+    all_zone = Incident.objects.filter(zone_name__icontains=zone_name)
+    total_all = all_zone.count()
+    resolved_all = all_zone.filter(status="RESOLVED").count()
+    resolution_rate = round(resolved_all / total_all * 100, 1) if total_all else 0.0
+
+    resolved_timed = list(all_zone.filter(status="RESOLVED", resolved_at__isnull=False)[:500])
+    avg_minutes = None
+    total_secs, sample_count = 0, 0
+    for inc in resolved_timed:
+        delta = (inc.resolved_at - inc.created_at).total_seconds()
+        if delta > 0:
+            total_secs += delta
+            sample_count += 1
+    if sample_count:
+        avg_minutes = round(total_secs / sample_count / 60)
+
+    last_12 = qs.filter(created_at__gte=now - timedelta(days=365)).count()
+    prior_12 = qs.filter(
+        created_at__gte=now - timedelta(days=730),
+        created_at__lt=now - timedelta(days=365),
+    ).count()
+    if prior_12 == 0 or last_12 == prior_12:
+        trend = "stable"
+    elif last_12 < prior_12:
+        trend = "improving"
+    else:
+        trend = "increasing"
+
+    if total_all == 0:
+        zone_score = 95
+    else:
+        years_span = max(1, (now - since_2010).days / 365)
+        per_year = total / years_span
+        freq_penalty = min(35, per_year * 1.5)
+        crit_high = qs.filter(severity__in=["CRITICAL", "HIGH"]).count()
+        sev_penalty = min(20, (crit_high / max(total, 1)) * 30)
+        res_bonus = (resolution_rate / 100) * 15
+        zone_score = int(max(0, min(100, round(100 - 10 - freq_penalty - sev_penalty + res_bonus))))
+
+    recent_5 = IncidentSerializer(qs.order_by("-created_at")[:5], many=True).data
+
+    return Response({
+        "zone_name": zone_name,
+        "total_incidents": total,
+        "by_type": by_type,
+        "by_year": by_year,
+        "resolution_rate": resolution_rate,
+        "avg_resolution_minutes": avg_minutes,
+        "trend": trend,
+        "zone_score": zone_score,
+        "recent_5": recent_5,
+    })
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def zone_stats(request):
+    since_2010 = datetime(2010, 1, 1, tzinfo=timezone.utc)
+    rows = (
+        Incident.objects.filter(status="RESOLVED", created_at__gte=since_2010)
+        .values("zone_name")
+        .annotate(cnt=Count("id"))
+        .order_by("-cnt")
+    )
+    return Response({r["zone_name"] or "Unknown": r["cnt"] for r in rows})

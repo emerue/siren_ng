@@ -115,6 +115,16 @@ export const getAnalyticsDonations = (range = '7d') =>
 export const getAnalyticsSubscribers = (range = '7d') =>
   api.get('/api/analytics/subscribers/', { params: { range } }).then((r) => r.data)
 
+// ── Historical data ────────────────────────────────────────────────────────────
+export const getHistoricalIncidents = (params?: Record<string, string>) =>
+  api.get('/api/incidents/', { params: { historical: 'true', ...params } }).then((r) => r.data)
+
+export const getZoneHistory = (zoneName: string) =>
+  api.get('/api/incidents/zone-history/', { params: { zone_name: zoneName } }).then((r) => r.data)
+
+export const getZoneStats = () =>
+  api.get('/api/incidents/zone-stats/').then((r) => r.data)
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const loginUser = (credentials: { username: string; password: string }) =>
   api.post('/api/auth/token/', credentials).then((r) => r.data)

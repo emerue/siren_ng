@@ -3,10 +3,12 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { createSubscription, getSubscriptions, updateSubscription, deleteSubscription } from '../api'
-import type { LocationSubscription } from '../types'
+import { createSubscription, getSubscriptions, updateSubscription, deleteSubscription, getZoneHistory } from '../api'
+import type { LocationSubscription, ZoneHistory } from '../types'
 import { createHash } from '../utils/hash'
 import Nav from '../components/Nav'
+import ZoneSafetyScoreCard from '../components/ZoneSafetyScoreCard'
+import ZoneHistoryPanel from '../components/ZoneHistoryPanel'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -15,6 +17,24 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
+// Extract Lagos zone name from a free-text label
+const KNOWN_ZONES = [
+  'Ikeja', 'Surulere', 'Lekki', 'Victoria Island', 'Ajah', 'Ikorodu', 'Badagry',
+  'Alimosho', 'Oshodi', 'Mushin', 'Agege', 'Kosofe', 'Apapa', 'Lagos Island',
+  'Yaba', 'Orile', 'Ojo', 'Ajegunle', 'Isale Eko', 'Festac', 'Ipaja', 'Egbeda',
+  'Ojodu', 'Berger', 'Gbagada', 'Maryland', 'Ketu', 'Mile 12', 'Iyana-Ipaja',
+  'Sangotedo', 'Epe', 'Ibeju-Lekki', 'Magodo', 'Ojota', 'Ogudu', 'Anthony',
+  'Palmgrove', 'Bariga', 'Shomolu', 'Abule-Egba', 'Dopemu', 'Ijora', 'Ejigbo',
+]
+
+function guessZone(label: string): string {
+  const lower = label.toLowerCase()
+  for (const z of KNOWN_ZONES) {
+    if (lower.includes(z.toLowerCase())) return z
+  }
+  return 'Lagos'
+}
+
 function PinPicker({ onSelect }: { onSelect: (lat: number, lng: number) => void }) {
   useMapEvents({ click(e) { onSelect(e.latlng.lat, e.latlng.lng) } })
   return null
@@ -22,12 +42,9 @@ function PinPicker({ onSelect }: { onSelect: (lat: number, lng: number) => void 
 
 function CommuteForm() {
   const [form, setForm] = useState({
-    whatsapp_number: '',
-    label: 'My commute',
-    home_lat: null as number | null,
-    home_lng: null as number | null,
-    office_lat: null as number | null,
-    office_lng: null as number | null,
+    whatsapp_number: '', label: 'My commute',
+    home_lat: null as number | null, home_lng: null as number | null,
+    office_lat: null as number | null, office_lng: null as number | null,
     commute_buffer_km: 1.5,
   })
   const [pinMode, setPinMode] = useState<'home' | 'office'>('home')
@@ -35,18 +52,13 @@ function CommuteForm() {
   const mut = useMutation({
     mutationFn: () => import('../api').then(({ createCommuteSubscription }) =>
       createCommuteSubscription({
-        whatsapp_number: form.whatsapp_number,
-        label: form.label,
-        location_lat: form.home_lat,
-        location_lng: form.home_lng,
-        office_lat: form.office_lat,
-        office_lng: form.office_lng,
+        whatsapp_number: form.whatsapp_number, label: form.label,
+        location_lat: form.home_lat, location_lng: form.home_lng,
+        office_lat: form.office_lat, office_lng: form.office_lng,
         commute_buffer_km: form.commute_buffer_km,
       })
     ),
-    onSuccess: () => {
-      alert('Commute Shield active! You will receive peak-hour route alerts.')
-    },
+    onSuccess: () => { alert('Commute Shield active! You will receive peak-hour route alerts.') },
   })
 
   return (
@@ -58,18 +70,15 @@ function CommuteForm() {
         className="w-full border border-border rounded-lg p-3 text-sm"
       />
       <div className="flex gap-2">
-        <button
-          onClick={() => setPinMode('home')}
-          className={`flex-1 py-2 rounded-lg text-xs font-semibold border ${pinMode === 'home' ? 'bg-primary text-white border-primary' : 'border-border'}`}
-        >
-          Set Home {form.home_lat ? '(set)' : ''}
-        </button>
-        <button
-          onClick={() => setPinMode('office')}
-          className={`flex-1 py-2 rounded-lg text-xs font-semibold border ${pinMode === 'office' ? 'bg-primary text-white border-primary' : 'border-border'}`}
-        >
-          Set Office {form.office_lat ? '(set)' : ''}
-        </button>
+        {(['home', 'office'] as const).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setPinMode(mode)}
+            className={`flex-1 py-2 rounded-lg text-xs font-semibold border ${pinMode === mode ? 'bg-primary text-white border-primary' : 'border-border'}`}
+          >
+            Set {mode.charAt(0).toUpperCase() + mode.slice(1)} {form[`${mode}_lat`] ? '(set)' : ''}
+          </button>
+        ))}
       </div>
       <p className="text-textMuted text-xs">Tap the map to set your {pinMode} location</p>
       <div className="rounded-xl overflow-hidden border border-border" style={{ height: 200 }}>
@@ -79,12 +88,8 @@ function CommuteForm() {
             if (pinMode === 'home') setForm((f) => ({ ...f, home_lat: lat, home_lng: lng }))
             else setForm((f) => ({ ...f, office_lat: lat, office_lng: lng }))
           }} />
-          {form.home_lat && form.home_lng && (
-            <Marker position={[form.home_lat, form.home_lng]} />
-          )}
-          {form.office_lat && form.office_lng && (
-            <Marker position={[form.office_lat, form.office_lng]} />
-          )}
+          {form.home_lat && form.home_lng && <Marker position={[form.home_lat, form.home_lng]} />}
+          {form.office_lat && form.office_lng && <Marker position={[form.office_lat, form.office_lng]} />}
         </MapContainer>
       </div>
       {mut.isError && <p className="text-primary text-sm">Failed. Please check details.</p>}
@@ -100,10 +105,31 @@ function CommuteForm() {
   )
 }
 
+// Mini wrapper: fetches zone history to get total + trend for each sub
+function SubScoreCard({ sub, onOpenHistory }: { sub: LocationSubscription; onOpenHistory: (zone: string, label: string) => void }) {
+  const zone = guessZone(sub.label)
+  const { data } = useQuery<ZoneHistory>({
+    queryKey: ['zone-history', zone],
+    queryFn: () => getZoneHistory(zone),
+    staleTime: 10 * 60 * 1000,
+  })
+
+  return (
+    <ZoneSafetyScoreCard
+      sub={sub}
+      zoneName={zone}
+      totalIncidents={data?.total_incidents}
+      trend={data?.trend}
+      onOpenHistory={() => onOpenHistory(zone, sub.label)}
+    />
+  )
+}
+
 export default function WatchPage() {
   const qc = useQueryClient()
   const [managePhone, setManagePhone] = useState('')
   const [manageHash, setManageHash] = useState('')
+  const [historyPanel, setHistoryPanel] = useState<{ zone: string; label: string } | null>(null)
   const [form, setForm] = useState({
     whatsapp_number: '', label: '', location_type: 'HOME',
     location_lat: null as number | null, location_lng: null as number | null,
@@ -149,10 +175,9 @@ export default function WatchPage() {
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
-        {/* Web form */}
+        {/* Save a location form */}
         <div className="bg-white rounded-xl border border-border p-5">
           <h3 className="font-bold mb-4">Save a location to watch</h3>
-
           <input
             value={form.whatsapp_number}
             onChange={(e) => setForm((f) => ({ ...f, whatsapp_number: e.target.value }))}
@@ -162,7 +187,7 @@ export default function WatchPage() {
           <input
             value={form.label}
             onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-            placeholder="Location name (e.g. My house, Timi school)"
+            placeholder="Location name (e.g. My house, Timi school Surulere)"
             className="w-full border border-border rounded-lg p-3 text-sm mb-3"
           />
           <select
@@ -175,7 +200,6 @@ export default function WatchPage() {
             ))}
           </select>
 
-          {/* Map pin */}
           <p className="text-textMuted text-xs mb-2">Tap the map to pin the location</p>
           <div className="rounded-xl overflow-hidden border border-border mb-3" style={{ height: 200 }}>
             <MapContainer center={[6.5244, 3.3792]} zoom={12} style={{ height: '100%', width: '100%' }}>
@@ -195,7 +219,6 @@ export default function WatchPage() {
             Use my current location
           </button>
 
-          {/* Radius */}
           <div className="grid grid-cols-4 gap-2 mb-4">
             {[[0.5,'500m'],[1.0,'1km'],[2.0,'2km'],[5.0,'5km']].map(([val, label]) => (
               <button
@@ -210,7 +233,6 @@ export default function WatchPage() {
 
           {createMut.isError && <p className="text-primary text-sm mb-2">Failed. Please check your details.</p>}
           {createMut.isSuccess && <p className="text-success text-sm mb-2">Location saved!</p>}
-
           <button
             onClick={() => createMut.mutate()}
             disabled={!form.whatsapp_number || !form.label || !form.location_lat || createMut.isPending}
@@ -220,7 +242,7 @@ export default function WatchPage() {
           </button>
         </div>
 
-        {/* Manage subscriptions */}
+        {/* Manage saved locations */}
         <div className="bg-white rounded-xl border border-border p-5">
           <h3 className="font-bold mb-3">Manage saved locations</h3>
           <div className="flex gap-2 mb-4">
@@ -242,6 +264,21 @@ export default function WatchPage() {
           {manageHash && !loadingSubs && subs.length === 0 && (
             <p className="text-textMuted text-sm">No saved locations found for this number.</p>
           )}
+
+          {/* Safety score cards (STATE 2 — INVESTED) */}
+          {subs.length > 0 && (
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {subs.map((sub) => (
+                <SubScoreCard
+                  key={sub.id}
+                  sub={sub}
+                  onOpenHistory={(zone, label) => setHistoryPanel({ zone, label })}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Compact controls below cards */}
           <div className="space-y-2">
             {subs.map((sub) => (
               <div key={sub.id} className="flex items-center justify-between border border-border rounded-lg p-3">
@@ -268,7 +305,7 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Commute Shield section */}
+        {/* Commute Shield */}
         <div className="bg-white rounded-xl border border-border p-5">
           <h3 className="font-bold mb-1">Commute Shield</h3>
           <p className="text-textBody text-sm mb-3">
@@ -278,12 +315,21 @@ export default function WatchPage() {
           <CommuteForm />
         </div>
 
-        {/* WhatsApp footnote */}
         <p className="text-textMuted text-xs text-center pb-4">
           Prefer WhatsApp? You can also manage locations via Siren on WhatsApp.{' '}
           <Link to="/connect" className="text-green-700 hover:underline">Connect WhatsApp →</Link>
         </p>
       </div>
+
+      {/* Zone History Drawer */}
+      {historyPanel && (
+        <ZoneHistoryPanel
+          zoneName={historyPanel.zone}
+          locationLabel={historyPanel.label}
+          isOpen={true}
+          onClose={() => setHistoryPanel(null)}
+        />
+      )}
     </div>
   )
 }

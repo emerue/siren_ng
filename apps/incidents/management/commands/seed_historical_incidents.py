@@ -952,7 +952,7 @@ def insert_incident(data: dict, do_geocode: bool):
             incident_type=data["incident_type"],
             description=data["description"],
             severity=data["severity"],
-            status="VERIFIED",
+            status="RESOLVED",
             location_lat=lat,
             location_lng=lng,
             address_text=data.get("address_text", ""),

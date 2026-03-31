@@ -157,7 +157,7 @@ function SubRow({
     queryFn: () => getZoneHistory(zone),
     staleTime: 10 * 60 * 1000,
   })
-  const score = sub.safety_score ?? 80
+  const score = data?.zone_score ?? sub.safety_score ?? 80
   const color = scoreColor(score)
   const safetyLabel = score >= 85 ? 'Well monitored' : score >= 60 ? 'Moderate activity' : 'High-activity area'
   const trendText = data?.trend === 'improving' ? '↓ Safer than last year'

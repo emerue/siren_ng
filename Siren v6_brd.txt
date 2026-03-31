@@ -1,9 +1,9 @@
 ================================================================================
 SIREN.NG — FULL BUSINESS REQUIREMENTS DOCUMENT
-Version 6 — Guardian & Commute Shield + Media Upload + WhatsApp Integration Page
+Version 7 — Historical Data Presentation Layer + Zone Safety Scores
 March 2026
 Stack: Python 3.13, Django 5.1, Supabase PostgreSQL, React, WhatsApp, Claude AI, Paystack
-Phases 1–7: COMPLETE.
+Phases 1–8: COMPLETE.
 ================================================================================
 
 READ THIS BEFORE WRITING ANY CODE.
@@ -12,6 +12,25 @@ Build in the exact phase order specified. Each phase must be fully working
 before starting the next. Do not skip ahead.
 
 If you are applying v6 updates to an existing v5 MVP, skip to SECTION 20.
+
+================================================================================
+WHAT CHANGED IN v7
+================================================================================
+
+Section 7.2  — CLOSED display status: Serializer returns "CLOSED" for any
+               RESOLVED incident older than 30 days. No DB migration.
+               DB field stays RESOLVED. Frontend uses the serialized value.
+Section 8    — Two new API endpoints: zone_history and zone_stats.
+               IncidentListView updated: historical=true/false filter,
+               year_from, year_to params, zone_name uses __icontains.
+Section 14   — FeedPage, WatchPage, MapPage, HomePage all updated (Phase 8).
+               FeedPage reads zone_name from URL params (home pill navigation).
+               CLOSED incidents hide vouch, share, donate, resource board.
+Section 16   — Phase 8 added: Historical Data Presentation Layer. COMPLETE.
+Section 22   — NEW: Historical Data Presentation Layer full spec.
+Phase 8      — Status: COMPLETE.
+
+Everything in Sections 1–21 from v6 is unchanged unless explicitly noted.
 
 ================================================================================
 WHAT CHANGED IN v6
@@ -1302,15 +1321,16 @@ class IncidentAdmin(admin.ModelAdmin):
 SECTION 16 — BUILD PHASES
 ================================================================================
 
-Phases 1–7: COMPLETE. Railway is live.
+Phases 1–8: COMPLETE. Railway is live.
 
-Phase 1 — Incidents App:           COMPLETE
-Phase 2 — WhatsApp App:            COMPLETE
-Phase 3 — Responders + Orgs:       COMPLETE
-Phase 4 — Resources + Donations:   COMPLETE
-Phase 5 — Subscriptions:           COMPLETE
-Phase 6 — React Frontend:          COMPLETE
-Phase 7 — Railway Deployment:      COMPLETE
+Phase 1 — Incidents App:                    COMPLETE
+Phase 2 — WhatsApp App:                     COMPLETE
+Phase 3 — Responders + Orgs:               COMPLETE
+Phase 4 — Resources + Donations:            COMPLETE
+Phase 5 — Subscriptions:                    COMPLETE
+Phase 6 — React Frontend:                   COMPLETE
+Phase 7 — Railway Deployment:               COMPLETE
+Phase 8 — Historical Data Presentation:     COMPLETE
 
 Deployment environment:
   Platform:    Railway (GitHub-connected, auto-deploy on push)
@@ -1871,6 +1891,362 @@ WHAT DOES NOT CHANGE IN v6
   - MyImpactPage — unchanged
   - All dashboard pages — unchanged (media inline added to incident detail)
 
+================================================================================
+
+================================================================================
+SECTION 22 — HISTORICAL DATA PRESENTATION LAYER (NEW v7)
+================================================================================
+
+Phase 8 is complete. This section documents every decision and constraint.
+
+--------------------------------------------------------------------------------
+22.1 PURPOSE
+--------------------------------------------------------------------------------
+
+Siren holds years of historical incident data for Lagos. This is not archive
+data — it is evidence. A family choosing where to live, a business assessing
+a warehouse location, a commuter planning a new route: all of them benefit
+from knowing what has happened in a given area since 2010.
+
+The goal of this layer is not to alarm. It is to reassure through credibility.
+A platform that says "we've been watching this zone since 2010, here's what
+we know" is more trustworthy than one that only shows what happened today.
+
+Emotional job: INFORM without ALARMING.
+Design rule: past incidents are presented as resolved, not as threats.
+
+--------------------------------------------------------------------------------
+22.2 DATA SEEDER — seed_historical_incidents
+--------------------------------------------------------------------------------
+
+Management command:
+  python manage.py seed_historical_incidents
+
+Location: apps/incidents/management/commands/seed_historical_incidents.py
+
+Three phases:
+  Phase 1 — Hardcoded: 69 curated historical incidents across all 7 types,
+            years 2010–2024, with real Lagos zone names, coordinates, and
+            descriptions written to match real incident patterns.
+  Phase 2 — Google News RSS: 16 search queries × up to 100 results each.
+            Queries target Nigerian news sources for each incident type.
+            URL: https://news.google.com/rss/search?q={query}&hl=en-NG
+            External ID: "gnews:" + sha256(url)[:32] (always ≤ 200 chars)
+  Phase 3 — Direct RSS: Vanguard, Premium Times, Daily Trust WordPress feeds.
+
+Deduplication: external_id field (max_length=200). Skip if already exists.
+Geocoding: optional --geocode flag. Nominatim API, 2-second delay per call.
+Date handling: RSS pubDate parsed, then used to override created_at via
+  .update() on the saved instance (bypasses auto_now_add=True).
+Encoding: all sanitized via sanitize() which replaces non-ASCII characters.
+Flags: --dry-run, --skip-hardcoded, --skip-live, --geocode, --limit N
+
+All seeded incidents are inserted with status=RESOLVED. They are the
+historical baseline. They never appear in the live feed.
+
+--------------------------------------------------------------------------------
+22.3 HISTORICAL vs LIVE — THE SEPARATION RULE
+--------------------------------------------------------------------------------
+
+This is a hard architectural rule. Never mix historical and live data.
+
+Definition:
+  HISTORICAL = status=RESOLVED AND created_at < (now - 30 days)
+  LIVE       = everything else (VERIFIED, RESPONDING, AGENCY_NOTIFIED,
+               plus recently RESOLVED within 30 days)
+
+Implementation in IncidentListView.get_queryset():
+  historical=true  → only old RESOLVED (created_at < cutoff)
+  historical=false → exclude old RESOLVED from normal queryset
+  historical omitted → normal queryset, old RESOLVED included
+
+FeedPage always sends historical=false for the live section.
+Historical section only appears when user explicitly toggles it.
+getActiveIncidents endpoint only returns VERIFIED/RESPONDING/AGENCY_NOTIFIED.
+  It never returns RESOLVED at all.
+Zone history endpoints always query historical data independently.
+
+Additional filters when historical=true: year_from, year_to, zone_name,
+incident_type, severity. All standard pagination applies.
+
+--------------------------------------------------------------------------------
+22.4 CLOSED STATUS — DISPLAY LOGIC
+--------------------------------------------------------------------------------
+
+Problem: Incidents resolved more than 30 days ago should not show live
+actions (vouch, donate, resource board). They are archived cases.
+
+Solution: Serializer-computed display state. No DB migration.
+  - DB stores: RESOLVED
+  - Serializer returns: CLOSED (for RESOLVED + created_at > 30 days old)
+
+Implementation in apps/incidents/serializers.py:
+  def _resolved_to_closed(obj):
+      if obj.status == 'RESOLVED':
+          cutoff = timezone.now() - timedelta(days=30)
+          if obj.created_at < cutoff:
+              return 'CLOSED'
+      return obj.status
+
+Applied to both IncidentSerializer and IncidentDetailSerializer via
+SerializerMethodField named 'status'.
+
+Frontend behaviour for CLOSED incidents:
+  - Grey badge: bg-gray-100 text-gray-500
+  - FeedPage card: hides vouch count, vouch button, share button, donation total
+  - TrackPage: hides vouch button, share button, resource board, donate section
+  - Resources query is disabled for CLOSED incidents
+  - Icon on TrackPage status hero: archive icon (instead of 🚨 or ✅)
+
+CLOSED is not in IncidentStatus.choices (DB constraint unchanged).
+It is a read-only display contract between serializer and frontend.
+
+--------------------------------------------------------------------------------
+22.5 NEW API ENDPOINTS
+--------------------------------------------------------------------------------
+
+GET /api/incidents/zone-history/?zone_name={zone}
+  Returns: zone_name, total_incidents, by_type (dict), by_year (list of
+           {year, count}), resolution_rate (%), avg_resolution_minutes (null
+           if unknown), trend ('improving'|'stable'|'increasing'), zone_score
+           (0–100 int), recent_5 (list of Incident)
+  Filter:  historical incidents only (RESOLVED, > 30 days old)
+  Auth:    AllowAny
+  Used by: ZoneHistoryPanel drawer, SubRow in WatchPage, MapPage history popup
+
+  Zone score formula:
+    base = 100 - 10 (fixed deduction for any known incident history)
+    freq_penalty = min(30, incident_count / 2)
+    sev_penalty = min(20, (critical_high_count / total) * 30)
+    res_bonus = min(10, (resolution_rate / 100) * 10)
+    score = max(0, min(100, base - freq_penalty - sev_penalty + res_bonus))
+
+  Trend logic (last 2 years vs previous 2 years):
+    improving  → recent 2yr count < prior 2yr count * 0.8
+    increasing → recent 2yr count > prior 2yr count * 1.2
+    stable     → neither
+
+GET /api/incidents/zone-stats/
+  Returns: dict of {zone_name: historical_incident_count}
+  Aggregates all historical incidents grouped by zone_name.
+  Auth:    AllowAny
+  Used by: HomePage zone grid cards ("Documented since 2010: X")
+
+Both endpoints are registered in apps/incidents/urls.py:
+  path('zone-history/', views.zone_history, name='incident-zone-history')
+  path('zone-stats/', views.zone_stats, name='incident-zone-stats')
+
+Frontend API functions in frontend/src/api/index.ts:
+  getHistoricalIncidents(params)  → GET /api/incidents/ with historical=true
+  getZoneHistory(zoneName)        → GET /api/incidents/zone-history/
+  getZoneStats()                  → GET /api/incidents/zone-stats/
+
+Frontend type in frontend/src/types/index.ts:
+  interface ZoneHistory {
+    zone_name: string; total_incidents: number; by_type: Record<string,number>;
+    by_year: Array<{year:number;count:number}>; resolution_rate: number;
+    avg_resolution_minutes: number|null; trend: 'improving'|'stable'|'increasing';
+    zone_score: number; recent_5: Incident[]
+  }
+
+--------------------------------------------------------------------------------
+22.6 COMPONENTS
+--------------------------------------------------------------------------------
+
+ZoneSafetyScoreCard (frontend/src/components/ZoneSafetyScoreCard.tsx)
+  128×128 SVG ring with animated stroke-dashoffset (1200ms ease-out).
+  Score colour: teal ≥85, amber ≥60, orange <60.
+  Ring animates 120ms after mount (useEffect + setTimeout).
+  Taps to open ZoneHistoryPanel. Shown as SubRow in WatchPage (see 22.6.1).
+
+ZoneHistoryPanel (frontend/src/components/ZoneHistoryPanel.tsx)
+  Slide-up drawer (350ms cubic-bezier). Backdrop closes on click.
+  Body scroll locked while open. Escape key closes.
+  Section A: Total count + top-3 type chips.
+  Section B: Recharts AreaChart trend by year (teal, 12% fill, no dots).
+             Only shown when by_year.length > 1.
+  Section C: Green progress bar for resolution_rate + avg resolution time.
+  Section D: recent_5 timeline (type icon + zone + month + severity dot +
+             "✓ Resolved").
+  Empty state: teal checkmark + "No documented incidents near [label] since
+  2010. This is a good sign — we'll keep watching."
+  Animation keyframes injected via <style> tag inside component.
+
+HistoricalIncidentCard (frontend/src/components/HistoricalIncidentCard.tsx)
+  Used in FeedPage historical section.
+  Visual: cool white bg (#F9FAFB), grey left accent (3px, #9CA3AF),
+          1px border (#E5E7EB).
+  Top row: type icon (60% opacity) + type name + "HISTORICAL · {year}" badge.
+  Middle: zone name, month-year, description (line-clamp-2 collapsed,
+          full on tap).
+  Bottom row: "✓ Resolved" (green) + severity dot + address.
+  No vouch, donate, share, status badge, or resource actions ever.
+  Tapping toggles description expansion (useState).
+
+HistoricalSectionDivider (exported from HistoricalIncidentCard.tsx)
+  Horizontal rule with centred label:
+  "Historical records · Lagos 2010–2025"
+
+--------------------------------------------------------------------------------
+22.6.1 SubRow — WatchPage inline score (replaces score card grid)
+--------------------------------------------------------------------------------
+
+The original design had a 2-column score card grid above compact control rows.
+Problem: on lookup, the grid inserted above the scroll position. Users never
+saw it and only noticed the compact controls.
+
+Fix: replaced both sections with a single SubRow per subscription.
+
+SubRow (defined inside WatchPage.tsx):
+  - Left: MiniScoreRing (64×64 SVG, r=24) — tappable, opens drawer
+  - Middle: label, location_type·km·active, safety label (colour-coded)
+  - Right: Pause / Delete buttons
+  - Bottom strip: trend text (coloured) + "X incidents since 2010 ›"
+                  Tapping opens ZoneHistoryPanel.
+  - Zone history fetched per subscription via getZoneHistory(guessZone(label))
+  - guessZone(): pattern-matches 40+ Lagos zone names from free-text label.
+    Falls back to 'Lagos'.
+
+MiniScoreRing: 64×64 SVG, r=24, strokeWidth=5. No animation.
+  Same colour scale as full ScoreRing.
+
+--------------------------------------------------------------------------------
+22.7 FEED PAGE — HISTORICAL TOGGLE
+--------------------------------------------------------------------------------
+
+Default state: historical OFF. Live feed uses historical=false param.
+Toggle: pill button top-right of filter bar. Label toggles between
+  "Show history" and "Including history".
+When ON: pill turns teal, historical section appears below live incidents.
+
+Historical section:
+  - HistoricalSectionDivider
+  - Year range selectors (2010 to current year, two dropdowns)
+  - HistoricalIncidentCard for each result
+  - Separate pagination state (histPage) independent of live page
+  - Empty state: "No historical incidents match these filters for this zone.
+                 Try expanding your date range or removing a filter."
+
+Zone filter from URL params:
+  FeedPage reads zone_name from URL search params on mount and via useEffect.
+  Home page zone pills link to /feed?zone_name={zone} — this auto-populates
+  the zone filter so the feed shows only that zone's incidents.
+
+--------------------------------------------------------------------------------
+22.8 MAP PAGE — HISTORICAL LAYER
+--------------------------------------------------------------------------------
+
+Default state: historical layer OFF.
+Toggle: absolutely positioned button, bottom-right of map, z-index 1000.
+  Position: bottom-24 right-3 (above Leaflet zoom controls at bottom-right).
+  When OFF: white bg, grey border, grey dot.
+  When ON: teal bg (#0D9488), white text, white dot.
+  Label: "Show history (2010–2025)" / "History: ON"
+
+Historical pins (zoom ≥ 11):
+  CircleMarker, radius 5, color #9CA3AF (Ghost Grey), fillOpacity 0.5, weight 1.
+  Popup: type icon + type name, zone + month-year, severity, "✓ Resolved",
+         link to track page.
+
+Zone clusters (zoom < 11):
+  CircleMarker per zone, radius = min(5 + sqrt(count)*2, 20), Ghost Grey,
+  fillOpacity 0.4. Popup shows zone name + count + "All resolved".
+  buildZoneClusters() groups incidents by zone_name, averages lat/lng.
+
+Data: fetched with getHistoricalIncidents({page_size:'300', incident_type?}).
+  Type filter from the existing filter bar applies to historical layer too.
+  staleTime: 5 minutes.
+
+ZoomTracker component (inside MapContainer):
+  useMapEvents({ zoomend }) → updates zoom state in parent → toggles
+  individual pins vs clusters.
+
+--------------------------------------------------------------------------------
+22.9 HOME PAGE — HISTORICAL ENHANCEMENTS
+--------------------------------------------------------------------------------
+
+Zone grid cards (Active Zones section):
+  Added: "Documented since 2010: X" in text-gray-400 below active/clear line.
+  Data source: getZoneStats() (zone-stats endpoint).
+  Matching: fuzzy — checks if zone name contains stat key or vice versa.
+  Only shown when histCount > 0.
+
+Resolved ticker (Recently Resolved section):
+  Now shows two types of entries:
+  1. Recent RESOLVED (last 30 days): existing white cards with status badge
+     and donation total.
+  2. Historical entries (4 from getHistoricalIncidents):
+     Grey left border (3px #9CA3AF), bg-gray-50, no donation total,
+     "HISTORICAL" badge (grey), date shows month+year not relative time.
+  Historical entries are not Links (no detail page navigation needed).
+  Both sections show under the same "Recently Resolved" heading.
+
+--------------------------------------------------------------------------------
+22.10 TESTING CHECKLIST FOR v7 / PHASE 8
+--------------------------------------------------------------------------------
+
+1.  Run seed: python manage.py seed_historical_incidents --dry-run
+    Confirm no errors.
+
+2.  Run seed: python manage.py seed_historical_incidents
+    Check admin: incidents list shows historical RESOLVED records with
+    external_id starting with "gnews:" or "hardcoded:".
+
+3.  GET /api/incidents/?historical=true&zone_name=Lekki
+    Confirm: only old RESOLVED, zone filter applies.
+
+4.  GET /api/incidents/?historical=false
+    Confirm: no RESOLVED incidents older than 30 days in results.
+
+5.  GET /api/incidents/zone-history/?zone_name=Surulere
+    Confirm: total_incidents, by_year array, resolution_rate, zone_score,
+    recent_5, trend all present.
+
+6.  GET /api/incidents/zone-stats/
+    Confirm: dict of zone_name → count.
+
+7.  Open /feed — confirm no historical incidents in default view.
+    Toggle "Show history" — confirm historical section appears below.
+    Select year range — confirm filter applies.
+
+8.  Click zone pill on home page (e.g. "Lekki") → confirm feed opens with
+    zone_name=Lekki pre-filled in filter.
+
+9.  Open /watch — enter phone → Look up — confirm SubRow cards appear
+    with mini score ring, safety label, trend, and "incidents since 2010".
+    Tap ring or bottom strip — confirm ZoneHistoryPanel drawer opens.
+    Confirm drawer shows: headline count, area chart, resolution bar,
+    recent 5 timeline.
+
+10. Open /map — click "Show history (2010–2025)" toggle.
+    Confirm grey ghost markers appear for historical incidents.
+    Zoom out past 11 — confirm zone cluster circles appear.
+    Zoom in past 11 — confirm individual markers appear.
+
+11. Open /track/:id for an incident with created_at > 30 days ago and
+    status=RESOLVED.
+    Confirm: status shows "CLOSED" in grey badge.
+    Confirm: vouch, share, donate, resource board are all hidden.
+
+12. Open /track/:id for a recent active incident.
+    Confirm: vouch and share buttons visible, donate section visible.
+
+--------------------------------------------------------------------------------
+22.11 WHAT DOES NOT CHANGE IN v7
+--------------------------------------------------------------------------------
+
+  - All v6 features (media upload, /connect page) — unchanged
+  - All WhatsApp flows — unchanged
+  - All subscription/alert tasks — unchanged
+  - All donation/Paystack logic — unchanged
+  - All responder/organisation flows — unchanged
+  - DB schema — no new migrations for Phase 8
+  - Celery/Redis/WebSocket — unchanged
+  - nixpacks.toml — unchanged
+  - Railway deployment config — unchanged
+
+================================================================================
+END OF SECTION 22
 ================================================================================
 
 ================================================================================
@@ -2843,10 +3219,12 @@ neurological or behavioural principle — not a personal preference.
 ================================================================================
 END OF DOCUMENT
 ================================================================================
-Siren.ng BRD v6 — March 2026
+Siren.ng BRD v7 — March 2026
 Guardian & Commute Shield + Media Upload + WhatsApp Integration Page +
-UI/UX Psychology & Premium Design System
+UI/UX Psychology & Premium Design System +
+Historical Data Presentation Layer + Zone Safety Scores
 Python 3.13 + Django 5.1 + psycopg3 + Supabase PostgreSQL + React +
 WhatsApp + Claude AI + Paystack
-Phases 1–7: COMPLETE. Live on Railway.
+Phases 1–8: COMPLETE.
+Phases 1–8: COMPLETE. Live on Railway.
 ================================================================================

@@ -2,8 +2,7 @@ import hashlib
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
 
-from django.db.models import Count, FloatField
-from django.db.models.expressions import RawSQL
+from django.db.models import Count
 from django.db.models.functions import ExtractYear
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
@@ -247,24 +246,75 @@ def zone_history(request):
     now = timezone.now()
 
     if lat_str and lng_str:
-        # Filter by Haversine distance from coordinates
         lat, lng = float(lat_str), float(lng_str)
-        distance_sql = (
-            "(6371 * acos(LEAST(1.0, "            "cos(radians(%s)) * cos(radians(location_lat)) * "            "cos(radians(location_lng) - radians(%s)) + "            "sin(radians(%s)) * sin(radians(location_lat))))"
-        )
-        qs = Incident.objects.annotate(
-            _dist=RawSQL(distance_sql, [lat, lng, lat], output_field=FloatField())
-        ).filter(
-            _dist__lte=radius_km,
-            status="RESOLVED",
-            created_at__gte=since_2010,
-        )
-        all_zone = Incident.objects.annotate(
-            _dist=RawSQL(distance_sql, [lat, lng, lat], output_field=FloatField())
-        ).filter(_dist__lte=radius_km)
-        # Use zone_name for display (most common zone in results, or label from caller)
-        top_zone = all_zone.values("zone_name").annotate(c=Count("id")).order_by("-c").first()
-        display_zone = top_zone["zone_name"] if top_zone and top_zone["zone_name"] else zone_name or "this area"
+
+        # Determine nearest Lagos zone to use for historical data (seeded incidents have
+        # zone_name but NULL coordinates due to Nominatim geocoding limitations)
+        ZONE_CENTROIDS = [
+            ("Ikeja",           6.6018, 3.3515),
+            ("Surulere",        6.5022, 3.3570),
+            ("Lekki",           6.4698, 3.5852),
+            ("Victoria Island", 6.4281, 3.4219),
+            ("Ajah",            6.4694, 3.5985),
+            ("Ikorodu",         6.6194, 3.5098),
+            ("Badagry",         6.4186, 2.8815),
+            ("Alimosho",        6.6105, 3.2630),
+            ("Oshodi",          6.5572, 3.3498),
+            ("Mushin",          6.5310, 3.3550),
+            ("Agege",           6.6225, 3.3268),
+            ("Kosofe",          6.5891, 3.3984),
+            ("Apapa",           6.4499, 3.3632),
+            ("Lagos Island",    6.4541, 3.3947),
+            ("Yaba",            6.5022, 3.3784),
+            ("Orile",           6.4789, 3.3568),
+            ("Ojo",             6.4712, 3.1791),
+            ("Ajegunle",        6.4802, 3.3572),
+            ("Isale Eko",       6.4527, 3.3917),
+            ("Festac",          6.4722, 3.2794),
+            ("Ipaja",           6.6104, 3.2445),
+            ("Egbeda",          6.5714, 3.2887),
+            ("Ojodu",           6.6376, 3.3589),
+            ("Gbagada",         6.5501, 3.3861),
+            ("Maryland",        6.5639, 3.3558),
+            ("Ketu",            6.5843, 3.3869),
+            ("Mile 12",         6.6067, 3.3835),
+            ("Iyana-Ipaja",     6.6017, 3.2644),
+            ("Sangotedo",       6.4616, 3.6603),
+            ("Epe",             6.5876, 3.9817),
+            ("Magodo",          6.6174, 3.3835),
+            ("Ogudu",           6.5696, 3.3941),
+            ("Bariga",          6.5322, 3.3902),
+            ("Shomolu",         6.5356, 3.3838),
+            ("Abule-Egba",      6.6391, 3.2727),
+            ("Dopemu",          6.6002, 3.2941),
+            ("Ijora",           6.4568, 3.3597),
+            ("Ejigbo",          6.5374, 3.3157),
+        ]
+        import math
+        def _dist2(z): return (z[1]-lat)**2 + (z[2]-lng)**2
+        nearest_zone = min(ZONE_CENTROIDS, key=_dist2)[0]
+
+        # IDs with real coordinates within radius (NULL coords excluded to prevent false matches)
+        from django.db import connection
+        with connection.cursor() as cur:
+            cur.execute(
+                """SELECT id FROM incidents_incident
+                   WHERE location_lat IS NOT NULL AND location_lng IS NOT NULL
+                   AND (6371 * acos(LEAST(1.0,
+                       cos(radians(%s)) * cos(radians(location_lat)) *
+                       cos(radians(location_lng) - radians(%s)) +
+                       sin(radians(%s)) * sin(radians(location_lat))
+                   ))) <= %s""",
+                [lat, lng, lat, radius_km]
+            )
+            nearby_ids = [row[0] for row in cur.fetchall()]
+
+        # Combine: coordinate-matched incidents + zone-name-matched historical incidents
+        from django.db.models import Q
+        filter_q = Q(id__in=nearby_ids) | Q(zone_name__icontains=nearest_zone)
+        qs = Incident.objects.filter(filter_q, status="RESOLVED", created_at__gte=since_2010)
+        all_zone = Incident.objects.filter(filter_q)
+        display_zone = nearest_zone
     else:
         qs = Incident.objects.filter(
             zone_name__icontains=zone_name,

@@ -24,7 +24,10 @@ const SEV_COLOR: Record<string, string> = {
 }
 
 interface Props {
-  zoneName: string
+  zoneName?: string
+  lat?: number
+  lng?: number
+  radiusKm?: number
   locationLabel: string
   isOpen: boolean
   onClose: () => void
@@ -58,13 +61,14 @@ function EmptyZone({ label }: { label: string }) {
   )
 }
 
-export default function ZoneHistoryPanel({ zoneName, locationLabel, isOpen, onClose }: Props) {
+export default function ZoneHistoryPanel({ zoneName, lat, lng, radiusKm, locationLabel, isOpen, onClose }: Props) {
   const overlayRef = useRef<HTMLDivElement>(null)
 
+  const hasCoords = lat != null && lng != null
   const { data, isLoading } = useQuery<ZoneHistory>({
-    queryKey: ['zone-history', zoneName],
-    queryFn: () => getZoneHistory(zoneName),
-    enabled: isOpen && !!zoneName,
+    queryKey: ['zone-history', lat ?? zoneName, lng],
+    queryFn: () => getZoneHistory(hasCoords ? { lat, lng, radiusKm: radiusKm ?? 3 } : { zoneName: zoneName ?? '' }),
+    enabled: isOpen && (hasCoords || !!zoneName),
     staleTime: 5 * 60 * 1000,
   })
 

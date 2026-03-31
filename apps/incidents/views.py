@@ -2,7 +2,8 @@ import hashlib
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
 
-from django.db.models import Count
+from django.db.models import Count, FloatField
+from django.db.models.expressions import RawSQL
 from django.db.models.functions import ExtractYear
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
@@ -234,17 +235,44 @@ def delete_media(request, pk, media_pk):
 @permission_classes([AllowAny])
 def zone_history(request):
     zone_name = request.query_params.get("zone_name", "").strip()
-    if not zone_name:
-        return Response({"error": "zone_name is required"}, status=400)
+    lat_str = request.query_params.get("lat")
+    lng_str = request.query_params.get("lng")
+    radius_km = float(request.query_params.get("radius_km", 3.0))
+
+    # Must have either zone_name or lat+lng
+    if not zone_name and not (lat_str and lng_str):
+        return Response({"error": "zone_name or lat+lng is required"}, status=400)
 
     since_2010 = datetime(2010, 1, 1, tzinfo=dt_timezone.utc)
     now = timezone.now()
 
-    qs = Incident.objects.filter(
-        zone_name__icontains=zone_name,
-        status="RESOLVED",
-        created_at__gte=since_2010,
-    )
+    if lat_str and lng_str:
+        # Filter by Haversine distance from coordinates
+        lat, lng = float(lat_str), float(lng_str)
+        distance_sql = (
+            "(6371 * acos(LEAST(1.0, "            "cos(radians(%s)) * cos(radians(location_lat)) * "            "cos(radians(location_lng) - radians(%s)) + "            "sin(radians(%s)) * sin(radians(location_lat))))"
+        )
+        qs = Incident.objects.annotate(
+            _dist=RawSQL(distance_sql, [lat, lng, lat], output_field=FloatField())
+        ).filter(
+            _dist__lte=radius_km,
+            status="RESOLVED",
+            created_at__gte=since_2010,
+        )
+        all_zone = Incident.objects.annotate(
+            _dist=RawSQL(distance_sql, [lat, lng, lat], output_field=FloatField())
+        ).filter(_dist__lte=radius_km)
+        # Use zone_name for display (most common zone in results, or label from caller)
+        top_zone = all_zone.values("zone_name").annotate(c=Count("id")).order_by("-c").first()
+        display_zone = top_zone["zone_name"] if top_zone and top_zone["zone_name"] else zone_name or "this area"
+    else:
+        qs = Incident.objects.filter(
+            zone_name__icontains=zone_name,
+            status="RESOLVED",
+            created_at__gte=since_2010,
+        )
+        all_zone = Incident.objects.filter(zone_name__icontains=zone_name)
+        display_zone = zone_name
 
     total = qs.count()
 
@@ -260,7 +288,6 @@ def zone_history(request):
     )
     by_year = [{"year": r["year"], "count": r["cnt"]} for r in by_year_qs]
 
-    all_zone = Incident.objects.filter(zone_name__icontains=zone_name)
     total_all = all_zone.count()
     resolved_all = all_zone.filter(status="RESOLVED").count()
     resolution_rate = round(resolved_all / total_all * 100, 1) if total_all else 0.0
@@ -302,7 +329,7 @@ def zone_history(request):
     recent_5 = IncidentSerializer(qs.order_by("-created_at")[:5], many=True).data
 
     return Response({
-        "zone_name": zone_name,
+        "zone_name": display_zone,
         "total_incidents": total,
         "by_type": by_type,
         "by_year": by_year,

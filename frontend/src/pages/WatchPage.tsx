@@ -17,22 +17,6 @@ L.Icon.Default.mergeOptions({
 })
 
 // Extract Lagos zone name from a free-text label
-const KNOWN_ZONES = [
-  'Ikeja', 'Surulere', 'Lekki', 'Victoria Island', 'Ajah', 'Ikorodu', 'Badagry',
-  'Alimosho', 'Oshodi', 'Mushin', 'Agege', 'Kosofe', 'Apapa', 'Lagos Island',
-  'Yaba', 'Orile', 'Ojo', 'Ajegunle', 'Isale Eko', 'Festac', 'Ipaja', 'Egbeda',
-  'Ojodu', 'Berger', 'Gbagada', 'Maryland', 'Ketu', 'Mile 12', 'Iyana-Ipaja',
-  'Sangotedo', 'Epe', 'Ibeju-Lekki', 'Magodo', 'Ojota', 'Ogudu', 'Anthony',
-  'Palmgrove', 'Bariga', 'Shomolu', 'Abule-Egba', 'Dopemu', 'Ijora', 'Ejigbo',
-]
-
-function guessZone(label: string): string {
-  const lower = label.toLowerCase()
-  for (const z of KNOWN_ZONES) {
-    if (lower.includes(z.toLowerCase())) return z
-  }
-  return 'Lagos'
-}
 
 function PinPicker({ onSelect }: { onSelect: (lat: number, lng: number) => void }) {
   useMapEvents({ click(e) { onSelect(e.latlng.lat, e.latlng.lng) } })
@@ -145,16 +129,16 @@ function SubRow({
   isDeleting,
 }: {
   sub: LocationSubscription
-  onOpenHistory: (zone: string, label: string) => void
+  onOpenHistory: (lat: number | null, lng: number | null, radiusKm: number, label: string) => void
   onPause: (id: string, next: boolean) => void
   onDelete: (id: string) => void
   isPausing: boolean
   isDeleting: boolean
 }) {
-  const zone = guessZone(sub.label)
   const { data } = useQuery<ZoneHistory>({
-    queryKey: ['zone-history', zone],
-    queryFn: () => getZoneHistory(zone),
+    queryKey: ['zone-history', sub.location_lat, sub.location_lng],
+    queryFn: () => getZoneHistory({ lat: sub.location_lat ?? undefined, lng: sub.location_lng ?? undefined, radiusKm: sub.alert_radius_km }),
+    enabled: sub.location_lat != null && sub.location_lng != null,
     staleTime: 10 * 60 * 1000,
   })
   const score = data?.zone_score ?? sub.safety_score ?? 80
@@ -171,7 +155,7 @@ function SubRow({
       <div className="flex items-center gap-3 p-3">
         {/* Score ring — tappable */}
         <button
-          onClick={() => onOpenHistory(zone, sub.label)}
+          onClick={() => onOpenHistory(sub.location_lat, sub.location_lng, sub.alert_radius_km, sub.label)}
           className="shrink-0 hover:opacity-80 transition"
           title="View zone history"
         >
@@ -206,7 +190,7 @@ function SubRow({
 
       {/* Bottom row: trend + view history link */}
       <button
-        onClick={() => onOpenHistory(zone, sub.label)}
+        onClick={() => onOpenHistory(sub.location_lat, sub.location_lng, sub.alert_radius_km, sub.label)}
         className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-border text-left hover:bg-gray-100 transition"
       >
         <span className="text-xs" style={{ color: trendColor }}>{trendText}</span>
@@ -225,7 +209,7 @@ export default function WatchPage() {
   const qc = useQueryClient()
   const [managePhone, setManagePhone] = useState('')
   const [manageHash, setManageHash] = useState('')
-  const [historyPanel, setHistoryPanel] = useState<{ zone: string; label: string } | null>(null)
+  const [historyPanel, setHistoryPanel] = useState<{ lat: number | null; lng: number | null; radiusKm: number; label: string } | null>(null)
   const [form, setForm] = useState({
     whatsapp_number: '', label: '', location_type: 'HOME',
     location_lat: null as number | null, location_lng: null as number | null,
@@ -367,7 +351,7 @@ export default function WatchPage() {
               <SubRow
                 key={sub.id}
                 sub={sub}
-                onOpenHistory={(zone, label) => setHistoryPanel({ zone, label })}
+                onOpenHistory={(lat, lng, radiusKm, label) => setHistoryPanel({ lat, lng, radiusKm, label })}
                 onPause={(id, next) => pauseMut.mutate({ id, is_active: next })}
                 onDelete={(id) => deleteMut.mutate(id)}
                 isPausing={pauseMut.isPending}
@@ -396,7 +380,9 @@ export default function WatchPage() {
       {/* Zone History Drawer */}
       {historyPanel && (
         <ZoneHistoryPanel
-          zoneName={historyPanel.zone}
+          lat={historyPanel.lat ?? undefined}
+          lng={historyPanel.lng ?? undefined}
+          radiusKm={historyPanel.radiusKm}
           locationLabel={historyPanel.label}
           isOpen={true}
           onClose={() => setHistoryPanel(null)}

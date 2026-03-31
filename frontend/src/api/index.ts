@@ -119,8 +119,14 @@ export const getAnalyticsSubscribers = (range = '7d') =>
 export const getHistoricalIncidents = (params?: Record<string, string>) =>
   api.get('/api/incidents/', { params: { historical: 'true', ...params } }).then((r) => r.data)
 
-export const getZoneHistory = (zoneName: string) =>
-  api.get('/api/incidents/zone-history/', { params: { zone_name: zoneName } }).then((r) => r.data)
+export const getZoneHistory = (params: { zoneName?: string; lat?: number; lng?: number; radiusKm?: number }) => {
+  const p: Record<string, string | number> = {}
+  if (params.zoneName) p.zone_name = params.zoneName
+  if (params.lat != null) p.lat = params.lat
+  if (params.lng != null) p.lng = params.lng
+  if (params.radiusKm != null) p.radius_km = params.radiusKm
+  return api.get('/api/incidents/zone-history/', { params: p }).then((r) => r.data)
+}
 
 export const getZoneStats = () =>
   api.get('/api/incidents/zone-stats/').then((r) => r.data)

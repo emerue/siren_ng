@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import Nav from '../components/Nav'
-import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link, useSearchParams } from 'react-router-dom'
 import { formatDistanceToNow } from 'date-fns'
 import { getIncidents, vouchIncident, getHistoricalIncidents } from '../api'
 import type { Incident } from '../types'
@@ -20,13 +20,24 @@ function StatusBadge({ status }: { status: string }) {
     VERIFIED: 'bg-blue-100 text-blue-800', RESPONDING: 'bg-green-100 text-green-800',
     VERIFYING: 'bg-yellow-100 text-amber-700', RESOLVED: 'bg-green-100 text-green-800',
     AGENCY_NOTIFIED: 'bg-purple-100 text-purple-800',
+    CLOSED: 'bg-gray-100 text-gray-500',
   }
   return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${c[status] || 'bg-gray-100 text-gray-500'}`}>{status.replace('_', ' ')}</span>
 }
 
 export default function FeedPage() {
+  const [searchParams] = useSearchParams()
   const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState({ zone_name: '', incident_type: '', severity: '', status: '' })
+  const [filters, setFilters] = useState({
+    zone_name: searchParams.get('zone_name') || '',
+    incident_type: '', severity: '', status: '',
+  })
+
+  // Sync zone_name if URL param changes (e.g. navigating from home page zone pills)
+  useEffect(() => {
+    const z = searchParams.get('zone_name')
+    if (z) setFilters((f) => ({ ...f, zone_name: z }))
+  }, [searchParams])
   const [showHistorical, setShowHistorical] = useState(false)
   const [histPage, setHistPage] = useState(1)
   const [yearFrom, setYearFrom] = useState(2010)
@@ -141,13 +152,17 @@ export default function FeedPage() {
             <p className="text-textBody text-sm line-clamp-2 mb-2">{inc.description}</p>
             <div className="flex items-center gap-3 text-xs text-textMuted">
               {inc.zone_name && <span>📍 {inc.zone_name}</span>}
-              <span>👍 {inc.vouch_count}</span>
-              {inc.donation_count > 0 && <span>₦{inc.total_donations_naira?.toLocaleString()}</span>}
+              {inc.status !== 'CLOSED' && <span>👍 {inc.vouch_count}</span>}
+              {inc.status !== 'CLOSED' && inc.donation_count > 0 && <span>₦{inc.total_donations_naira?.toLocaleString()}</span>}
             </div>
             <div className="flex gap-2 mt-3">
               <Link to={`/track/${inc.id}`} className="text-primary text-xs font-semibold hover:underline">View details →</Link>
-              <button onClick={() => vouchMut.mutate(inc.id)} className="text-xs text-textMuted hover:text-primary">Vouch</button>
-              <button onClick={() => navigator.clipboard.writeText(`${window.location.origin}/track/${inc.id}`)} className="text-xs text-textMuted hover:text-primary">Share</button>
+              {!['CLOSED', 'RESOLVED', 'REJECTED'].includes(inc.status) && (
+                <button onClick={() => vouchMut.mutate(inc.id)} className="text-xs text-textMuted hover:text-primary">Vouch</button>
+              )}
+              {inc.status !== 'CLOSED' && (
+                <button onClick={() => navigator.clipboard.writeText(`${window.location.origin}/track/${inc.id}`)} className="text-xs text-textMuted hover:text-primary">Share</button>
+              )}
             </div>
           </div>
         ))}

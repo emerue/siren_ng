@@ -25,6 +25,7 @@ function StatusBadge({ status }: { status: string }) {
     AGENCY_NOTIFIED: 'bg-purple-100 text-purple-800',
     DETECTED: 'bg-gray-100 text-gray-600',
     REJECTED: 'bg-gray-100 text-gray-400',
+    CLOSED: 'bg-gray-100 text-gray-500',
   }
   return (
     <span className={`inline-block text-sm font-bold px-3 py-1 rounded-full ${map[status] || 'bg-gray-100 text-gray-500'}`}>
@@ -144,7 +145,7 @@ export default function TrackPage() {
     queryKey: ['resources', id],
     queryFn: () => getResources(id!),
     refetchInterval: 30_000,
-    enabled: !!id && !!incident && ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status),
+    enabled: !!id && !!incident && ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status) && incident.status !== 'CLOSED',
   })
 
   const { data: donationSummary } = useQuery<DonationSummary>({
@@ -188,7 +189,8 @@ export default function TrackPage() {
   if (isLoading) return <div className="flex items-center justify-center h-screen text-textMuted">Loading...</div>
   if (!incident) return <div className="flex items-center justify-center h-screen text-textMuted">Incident not found.</div>
 
-  const showResourceBoard = ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status)
+  const isClosed = incident.status === 'CLOSED'
+  const showResourceBoard = !isClosed && ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status)
   const mediaItems: IncidentMedia[] = incident.media ?? []
 
   return (
@@ -199,7 +201,7 @@ export default function TrackPage() {
         {/* Status */}
         <div className="bg-white rounded-xl border border-border p-6 text-center">
           <div className="text-4xl mb-3">
-            {incident.status === 'RESOLVED' ? '✅' : incident.status === 'REJECTED' ? '❌' : '🚨'}
+            {incident.status === 'CLOSED' ? '🗂️' : incident.status === 'RESOLVED' ? '✅' : incident.status === 'REJECTED' ? '❌' : '🚨'}
           </div>
           <StatusBadge status={incident.status} />
           <div className="mt-3 flex items-center justify-center gap-2">
@@ -210,21 +212,23 @@ export default function TrackPage() {
           <p className="text-textMuted text-xs mt-1">
             {formatDistanceToNow(new Date(incident.created_at), { addSuffix: true })}
           </p>
-          <div className="flex gap-2 justify-center mt-4">
-            <button
-              onClick={() => vouchMut.mutate()}
-              disabled={vouchMut.isPending}
-              className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition"
-            >
-              Vouch ({incident.vouch_count})
-            </button>
-            <button
-              onClick={() => { navigator.clipboard.writeText(window.location.href) }}
-              className="border border-border px-4 py-2 rounded-lg text-sm hover:border-primary transition"
-            >
-              Share
-            </button>
-          </div>
+          {!['CLOSED', 'RESOLVED', 'REJECTED'].includes(incident.status) && (
+            <div className="flex gap-2 justify-center mt-4">
+              <button
+                onClick={() => vouchMut.mutate()}
+                disabled={vouchMut.isPending}
+                className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition"
+              >
+                Vouch ({incident.vouch_count})
+              </button>
+              <button
+                onClick={() => { navigator.clipboard.writeText(window.location.href) }}
+                className="border border-border px-4 py-2 rounded-lg text-sm hover:border-primary transition"
+              >
+                Share
+              </button>
+            </div>
+          )}
         </div>
 
         {fromCommute && (

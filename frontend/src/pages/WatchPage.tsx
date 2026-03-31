@@ -7,7 +7,6 @@ import { createSubscription, getSubscriptions, updateSubscription, deleteSubscri
 import type { LocationSubscription, ZoneHistory } from '../types'
 import { createHash } from '../utils/hash'
 import Nav from '../components/Nav'
-import ZoneSafetyScoreCard from '../components/ZoneSafetyScoreCard'
 import ZoneHistoryPanel from '../components/ZoneHistoryPanel'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
@@ -105,23 +104,120 @@ function CommuteForm() {
   )
 }
 
-// Mini wrapper: fetches zone history to get total + trend for each sub
-function SubScoreCard({ sub, onOpenHistory }: { sub: LocationSubscription; onOpenHistory: (zone: string, label: string) => void }) {
+function scoreColor(score: number) {
+  if (score >= 85) return '#0D9488'
+  if (score >= 60) return '#D97706'
+  return '#EA580C'
+}
+
+// Compact ring — 64x64 SVG, used inline inside the subscription row
+function MiniScoreRing({ score }: { score: number }) {
+  const r = 24
+  const circ = 2 * Math.PI * r
+  const color = scoreColor(score)
+  return (
+    <svg width="64" height="64" viewBox="0 0 64 64" aria-label={`Safety score ${score}`}>
+      <circle cx="32" cy="32" r={r} fill="none" stroke="#E5E7EB" strokeWidth="5" />
+      <circle
+        cx="32" cy="32" r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth="5"
+        strokeDasharray={circ}
+        strokeDashoffset={circ * (1 - score / 100)}
+        strokeLinecap="round"
+        style={{ transform: 'rotate(-90deg)', transformOrigin: '32px 32px' }}
+      />
+      <text x="32" y="32" textAnchor="middle" dominantBaseline="central" fill={color} fontSize="14" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">
+        {score}
+      </text>
+    </svg>
+  )
+}
+
+// Combined score + controls card — replaces the separate grid + compact rows
+function SubRow({
+  sub,
+  onOpenHistory,
+  onPause,
+  onDelete,
+  isPausing,
+  isDeleting,
+}: {
+  sub: LocationSubscription
+  onOpenHistory: (zone: string, label: string) => void
+  onPause: (id: string, next: boolean) => void
+  onDelete: (id: string) => void
+  isPausing: boolean
+  isDeleting: boolean
+}) {
   const zone = guessZone(sub.label)
   const { data } = useQuery<ZoneHistory>({
     queryKey: ['zone-history', zone],
     queryFn: () => getZoneHistory(zone),
     staleTime: 10 * 60 * 1000,
   })
+  const score = sub.safety_score ?? 80
+  const color = scoreColor(score)
+  const safetyLabel = score >= 85 ? 'Well monitored' : score >= 60 ? 'Moderate activity' : 'High-activity area'
+  const trendText = data?.trend === 'improving' ? '↓ Safer than last year'
+    : data?.trend === 'increasing' ? '↑ More active than last year'
+    : '→ Activity stable'
+  const trendColor = data?.trend === 'improving' ? '#0D9488' : data?.trend === 'increasing' ? '#D97706' : '#6B7280'
 
   return (
-    <ZoneSafetyScoreCard
-      sub={sub}
-      zoneName={zone}
-      totalIncidents={data?.total_incidents}
-      trend={data?.trend}
-      onOpenHistory={() => onOpenHistory(zone, sub.label)}
-    />
+    <div className="border border-border rounded-xl overflow-hidden">
+      {/* Top row: ring + info + controls */}
+      <div className="flex items-center gap-3 p-3">
+        {/* Score ring — tappable */}
+        <button
+          onClick={() => onOpenHistory(zone, sub.label)}
+          className="shrink-0 hover:opacity-80 transition"
+          title="View zone history"
+        >
+          <MiniScoreRing score={score} />
+        </button>
+
+        {/* Location info */}
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-textPrimary text-sm truncate">{sub.label}</div>
+          <div className="text-xs text-textMuted">{sub.location_type} · {sub.alert_radius_km}km · {sub.is_active ? 'Active' : 'Paused'}</div>
+          <div className="text-xs mt-0.5" style={{ color }}>{safetyLabel}</div>
+        </div>
+
+        {/* Controls */}
+        <div className="flex gap-1.5 shrink-0">
+          <button
+            onClick={() => onPause(sub.id, !sub.is_active)}
+            disabled={isPausing}
+            className="text-xs border border-border px-2 py-1 rounded hover:border-primary disabled:opacity-50"
+          >
+            {sub.is_active ? 'Pause' : 'Resume'}
+          </button>
+          <button
+            onClick={() => onDelete(sub.id)}
+            disabled={isDeleting}
+            className="text-xs text-red-600 border border-red-200 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom row: trend + view history link */}
+      <button
+        onClick={() => onOpenHistory(zone, sub.label)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-border text-left hover:bg-gray-100 transition"
+      >
+        <span className="text-xs" style={{ color: trendColor }}>{trendText}</span>
+        <span className="text-xs text-gray-400 flex items-center gap-1">
+          {data?.total_incidents !== undefined
+            ? `${data.total_incidents} incidents since 2010`
+            : 'View zone history'}
+          <span>›</span>
+        </span>
+      </button>
+    </div>
   )
 }
 
@@ -265,42 +361,18 @@ export default function WatchPage() {
             <p className="text-textMuted text-sm">No saved locations found for this number.</p>
           )}
 
-          {/* Safety score cards (STATE 2 — INVESTED) */}
-          {subs.length > 0 && (
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              {subs.map((sub) => (
-                <SubScoreCard
-                  key={sub.id}
-                  sub={sub}
-                  onOpenHistory={(zone, label) => setHistoryPanel({ zone, label })}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Compact controls below cards */}
+          {/* Unified score + controls rows */}
           <div className="space-y-2">
             {subs.map((sub) => (
-              <div key={sub.id} className="flex items-center justify-between border border-border rounded-lg p-3">
-                <div>
-                  <div className="font-medium text-textPrimary text-sm">{sub.label}</div>
-                  <div className="text-textMuted text-xs">{sub.location_type} · {sub.alert_radius_km}km · {sub.is_active ? 'Active' : 'Paused'}</div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => pauseMut.mutate({ id: sub.id, is_active: !sub.is_active })}
-                    className="text-xs border border-border px-2 py-1 rounded hover:border-primary"
-                  >
-                    {sub.is_active ? 'Pause' : 'Resume'}
-                  </button>
-                  <button
-                    onClick={() => deleteMut.mutate(sub.id)}
-                    className="text-xs text-red-600 border border-red-200 px-2 py-1 rounded hover:bg-red-50"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
+              <SubRow
+                key={sub.id}
+                sub={sub}
+                onOpenHistory={(zone, label) => setHistoryPanel({ zone, label })}
+                onPause={(id, next) => pauseMut.mutate({ id, is_active: next })}
+                onDelete={(id) => deleteMut.mutate(id)}
+                isPausing={pauseMut.isPending}
+                isDeleting={deleteMut.isPending}
+              />
             ))}
           </div>
         </div>

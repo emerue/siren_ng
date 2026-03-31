@@ -4,12 +4,12 @@
  * Tapping opens the Zone History Panel drawer.
  * Emotional job: Reassurance + credibility.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { LocationSubscription } from '../types'
 
 interface Props {
   sub: LocationSubscription
-  zoneName: string
+  zoneName?: string
   totalIncidents?: number
   trend?: 'improving' | 'stable' | 'increasing'
   onOpenHistory: () => void
@@ -63,7 +63,7 @@ function ScoreRing({ score, animate }: { score: number; animate: boolean }) {
   )
 }
 
-export default function ZoneSafetyScoreCard({ sub, zoneName, totalIncidents, trend, onOpenHistory }: Props) {
+export default function ZoneSafetyScoreCard({ sub, zoneName: _zoneName, totalIncidents, trend, onOpenHistory }: Props) {
   const score = sub.safety_score ?? 80
   const [animate, setAnimate] = useState(false)
   const color = scoreColor(score)

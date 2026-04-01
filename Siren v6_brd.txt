@@ -3228,3 +3228,24 @@ WhatsApp + Claude AI + Paystack
 Phases 1–8: COMPLETE.
 Phases 1–8: COMPLETE. Live on Railway.
 ================================================================================
+
+
+  ---                                                                  To import any new data:                                            
+  python manage.py import_incidents_csv data/your_file.csv           
+  python manage.py import_incidents_csv data/your_file.csv --update  
+    # overwrite existing                                             
+  python manage.py import_incidents_csv data/your_file.csv --dry-run     # validate only                                                  
+                                                                       CSV format rules:                                                    - Always quote any field that contains a comma — especially        
+  description, address_text                                            - media_urls must be a JSON array:                                 
+  ["https://url1.com","https://url2.com"] or []                      
+  - is_infrastructure: TRUE or FALSE                                   - status: use RESOLVED for historical data (CLOSED is computed
+  automatically for >30 day old records)                             
+  - resolved_at can be blank for unresolved incidents                                                                                       What was imported (21 incidents):                                    - Ikoyi tower collapse 2021 (44 dead) — with Wikipedia + BBC links
+  - Ita-Faaji school collapse 2019 — BBC link                          - GNI Building Balogun fire Dec 2025 (CRITICAL)
+  - Afriland Towers fire Sept 2025                                   
+  - Otedola Bridge tanker explosion 2018                               - Ojodu-Berger restaurant collapse 2025                            
+  - MMIA airport fire 2026 — with image                                - Igbologun boat capsize 2026        
+  - Lekki flood 2025, Sangotedo gas explosion 2026, and more                                                                     
+  All incidents now have correct zone names (Ikoyi, Lagos Island,    
+  Lekki, Ojodu, Ikeja, etc.) and the ones with media URLs will show    as clickable source links on their TrackPage.                      
+                                                 

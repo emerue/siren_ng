@@ -290,6 +290,7 @@ export default function TrackPage() {
   const [showClaimModal, setShowClaimModal] = useState<string | null>(null)
   const [suggestForm, setSuggestForm] = useState({ category: 'OTHER', label: '', suggested_by_name: '' })
   const [claimForm, setClaimForm] = useState({ claimer_name: '', claimer_phone: '' })
+  const [liveMediaUrls, setLiveMediaUrls] = useState<string[] | null>(null)
 
   const { data: incident, isLoading } = useQuery<Incident>({
     queryKey: ['incident', id],
@@ -349,7 +350,6 @@ export default function TrackPage() {
   const isClosed = incident.status === 'CLOSED'
   const showResourceBoard = !isClosed && ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status)
   const mediaItems: IncidentMedia[] = incident.media ?? []
-  const [liveMediaUrls, setLiveMediaUrls] = useState<string[] | null>(null)
   const mediaUrls = liveMediaUrls ?? (incident.media_urls ?? [])
 
   return (

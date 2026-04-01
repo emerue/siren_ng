@@ -957,7 +957,7 @@ def insert_incident(data: dict, do_geocode: bool):
             location_lng=lng,
             address_text=data.get("address_text", ""),
             zone_name=data.get("zone_name", "Lagos"),
-            media_urls=[],
+            media_urls=[u for u in [data.get("source_url")] if u],
             ai_confidence=AI_CONFIDENCE,
             fraud_score=0.0,
             ai_raw_response={"seed": "historical", "source": ext_id},
@@ -1060,6 +1060,7 @@ def scrape_gnews_rss(queries: list, stdout, style) -> list:
                 "is_infrastructure": is_infra,
                 "pub_date": pub_date,
                 "source": source_name,
+                "source_url": link,
             })
 
     return results
@@ -1140,6 +1141,7 @@ def scrape_direct_rss(feeds: list, stdout, style) -> list:
                 "is_infrastructure": is_infra,
                 "pub_date": pub_date,
                 "source": feed_cfg["name"],
+                "source_url": article_url,
             })
 
     return results

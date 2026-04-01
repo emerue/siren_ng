@@ -51,6 +51,12 @@ export const uploadMedia = (incidentId: string, files: File | File[]) => {
 export const deleteMedia = (incidentId: string, mediaId: number) =>
   api.delete(`/api/incidents/${incidentId}/media/${mediaId}/`).then((r) => r.data)
 
+export const addMediaUrl = (incidentId: string, url: string) =>
+  api.post(`/api/incidents/${incidentId}/media-urls/`, { url }).then((r) => r.data)
+
+export const removeMediaUrl = (incidentId: string, url: string) =>
+  api.delete(`/api/incidents/${incidentId}/media-urls/`, { data: { url } }).then((r) => r.data)
+
 // ── Resources ─────────────────────────────────────────────────────────────────
 export const getResources = (incidentId: string) =>
   api.get('/api/resources/', { params: { incident: incidentId } }).then((r) => r.data)

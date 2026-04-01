@@ -228,6 +228,42 @@ def delete_media(request, pk, media_pk):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+# -- Media URL management -------------------------------------------------------
+
+@api_view(["GET", "POST", "DELETE"])
+@permission_classes([AllowAny])
+def manage_media_urls(request, pk):
+    """
+    GET  → returns current media_urls list
+    POST → body: {"url": "https://..."} — appends URL to media_urls
+    DELETE → body: {"url": "https://..."} — removes URL from media_urls
+    Requires admin auth for POST/DELETE (or session hash owner).
+    """
+    incident = get_object_or_404(Incident, pk=pk)
+
+    if request.method == "GET":
+        return Response({"media_urls": incident.media_urls or []})
+
+    url = (request.data.get("url") or "").strip()
+    if not url:
+        return Response({"error": "url is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    urls = list(incident.media_urls or [])
+
+    if request.method == "POST":
+        if url not in urls:
+            urls.append(url)
+        incident.media_urls = urls
+        incident.save(update_fields=["media_urls"])
+        return Response({"media_urls": urls}, status=status.HTTP_200_OK)
+
+    if request.method == "DELETE":
+        urls = [u for u in urls if u != url]
+        incident.media_urls = urls
+        incident.save(update_fields=["media_urls"])
+        return Response({"media_urls": urls}, status=status.HTTP_200_OK)
+
+
 # -- Historical analytics views ------------------------------------------------
 
 @api_view(["GET"])

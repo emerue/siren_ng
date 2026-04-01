@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import { formatDistanceToNow } from 'date-fns'
-import { getIncident, getResources, getDonationSummary, vouchIncident, suggestResource, claimResource } from '../api'
+import { getIncident, getResources, getDonationSummary, vouchIncident, suggestResource, claimResource, addMediaUrl, removeMediaUrl } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
 import type { Incident, ResourceItem, DonationSummary, IncidentMedia } from '../types'
 
@@ -61,59 +61,216 @@ function ResourceStatusBadge({ status }: { status: string }) {
   )
 }
 
-function MediaGallery({ media }: { media: IncidentMedia[] }) {
-  const [lightbox, setLightbox] = useState<IncidentMedia | null>(null)
+// ── Media helpers ────────────────────────────────────────────────────────────
+function isImageUrl(url: string) {
+  return /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(url)
+}
+function isVideoUrl(url: string) {
+  return /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url) || /youtube\.com|youtu\.be|vimeo\.com/i.test(url)
+}
+function youtubeThumb(url: string) {
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/)([\w-]{11})/)
+  return m ? `https://img.youtube.com/vi/${m[1]}/mqdefault.jpg` : null
+}
+function domainOf(url: string) {
+  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
+}
 
-  if (media.length === 0) return null
+function MediaGallery({
+  media,
+  mediaUrls,
+  incidentId,
+  onUrlsChanged,
+}: {
+  media: IncidentMedia[]
+  mediaUrls: string[]
+  incidentId: string
+  onUrlsChanged: (urls: string[]) => void
+}) {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
+  const [addUrl, setAddUrl] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [showAdd, setShowAdd] = useState(false)
+
+  const imageUrls = mediaUrls.filter(isImageUrl)
+  const videoUrls = mediaUrls.filter(isVideoUrl)
+  const linkUrls  = mediaUrls.filter(u => !isImageUrl(u) && !isVideoUrl(u))
+
+  const allImages = [
+    ...media.filter(m => m.media_type === 'image').map(m => ({ src: m.public_url, key: m.id.toString(), uploaded: true })),
+    ...imageUrls.map(u => ({ src: u, key: u, uploaded: false })),
+  ]
+  const allVideos = [
+    ...media.filter(m => m.media_type === 'video').map(m => ({ src: m.public_url, key: m.id.toString(), thumb: null as string | null })),
+    ...videoUrls.map(u => ({ src: u, key: u, thumb: youtubeThumb(u) })),
+  ]
+
+  const totalItems = allImages.length + allVideos.length + linkUrls.length
+
+  async function handleAddUrl() {
+    if (!addUrl.trim()) return
+    setAdding(true)
+    try {
+      const res = await addMediaUrl(incidentId, addUrl.trim())
+      onUrlsChanged(res.media_urls)
+      setAddUrl('')
+      setShowAdd(false)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  async function handleRemoveUrl(url: string) {
+    const res = await removeMediaUrl(incidentId, url)
+    onUrlsChanged(res.media_urls)
+  }
 
   return (
-    <div className="bg-white rounded-xl border border-border p-4">
-      <h3 className="font-semibold text-textPrimary mb-3">
-        Evidence · {media.length} file{media.length !== 1 ? 's' : ''}
-      </h3>
-      <div className="grid grid-cols-3 gap-2">
-        {media.map((m) => (
-          <button
-            key={m.id}
-            onClick={() => m.media_type === 'image' && setLightbox(m)}
-            className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 group"
-          >
-            {m.media_type === 'image' ? (
-              <img
-                src={m.public_url}
-                alt=""
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-              />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900 text-white">
-                <span className="text-3xl mb-1">▶</span>
-                <span className="text-xs opacity-70">Video</span>
-              </div>
-            )}
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition" />
-          </button>
-        ))}
+    <div className="bg-white rounded-xl border border-border p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-textPrimary">
+          Media & Sources
+          {totalItems > 0 && (
+            <span className="ml-2 text-xs font-normal text-gray-400">
+              {totalItems} item{totalItems !== 1 ? 's' : ''}
+            </span>
+          )}
+        </h3>
+        <button
+          onClick={() => setShowAdd(v => !v)}
+          className="text-xs text-primary font-semibold hover:underline"
+        >
+          + Add URL
+        </button>
       </div>
-      <p className="text-xs text-textMuted mt-2">
-        Tap an image to enlarge · Files are visible to responders and admins only.
-      </p>
 
-      {/* Lightbox */}
-      {lightbox && (
+      {showAdd && (
+        <div className="flex gap-2">
+          <input
+            value={addUrl}
+            onChange={e => setAddUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAddUrl()}
+            placeholder="Paste image, video or article URL…"
+            className="flex-1 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary"
+            autoFocus
+          />
+          <button
+            onClick={handleAddUrl}
+            disabled={adding || !addUrl.trim()}
+            className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+          >
+            {adding ? '…' : 'Add'}
+          </button>
+        </div>
+      )}
+
+      {totalItems === 0 && !showAdd && (
+        <p className="text-sm text-gray-400">No media attached. Use + Add URL to link an image, video or news article.</p>
+      )}
+
+      {allImages.length > 0 && (
+        <div className="grid grid-cols-3 gap-2">
+          {allImages.map((img) => (
+            <div key={img.key} className="relative group">
+              <button
+                onClick={() => setLightboxSrc(img.src)}
+                className="w-full aspect-square rounded-lg overflow-hidden bg-gray-100 block"
+              >
+                <img
+                  src={img.src}
+                  alt=""
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                  onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }}
+                />
+              </button>
+              {!img.uploaded && (
+                <button
+                  onClick={() => handleRemoveUrl(img.src)}
+                  className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 text-xs hidden group-hover:flex items-center justify-center leading-none"
+                  title="Remove"
+                >×</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {allVideos.length > 0 && (
+        <div className="space-y-2">
+          {allVideos.map((v) => (
+            <div key={v.key} className="relative group">
+              <a
+                href={v.src}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-xl overflow-hidden border border-gray-100 hover:border-gray-300 transition bg-gray-50 hover:bg-gray-100"
+              >
+                {v.thumb ? (
+                  <img src={v.thumb} alt="" className="w-24 h-16 object-cover shrink-0" />
+                ) : (
+                  <div className="w-24 h-16 bg-gray-900 flex items-center justify-center shrink-0">
+                    <span className="text-white text-xl">▶</span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0 py-2 pr-2">
+                  <p className="text-xs text-gray-400 mb-0.5">{domainOf(v.src)}</p>
+                  <p className="text-sm font-medium text-gray-700 truncate">{v.src}</p>
+                </div>
+                <span className="text-gray-300 pr-3 shrink-0">↗</span>
+              </a>
+              <button
+                onClick={() => handleRemoveUrl(v.src)}
+                className="absolute top-1.5 right-8 bg-black/60 text-white rounded-full w-5 h-5 text-xs hidden group-hover:flex items-center justify-center leading-none"
+                title="Remove"
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {linkUrls.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Sources & Links</p>
+          {linkUrls.map((url) => (
+            <div key={url} className="flex items-center gap-2 group">
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 flex items-center gap-3 rounded-xl border border-gray-100 hover:border-primary hover:bg-gray-50 transition px-3 py-2.5"
+              >
+                <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 text-sm">
+                  🔗
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-400 mb-0.5">{domainOf(url)}</p>
+                  <p className="text-sm text-gray-700 truncate">{url}</p>
+                </div>
+                <span className="text-gray-300 text-sm shrink-0">↗</span>
+              </a>
+              <button
+                onClick={() => handleRemoveUrl(url)}
+                className="text-gray-300 hover:text-red-400 transition hidden group-hover:block px-1 text-lg leading-none"
+                title="Remove"
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {lightboxSrc && (
         <div
-          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
-          onClick={() => setLightbox(null)}
+          className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4"
+          onClick={() => setLightboxSrc(null)}
         >
           <button
-            className="absolute top-4 right-4 text-white text-3xl w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full"
-            onClick={() => setLightbox(null)}
-          >
-            ×
-          </button>
+            className="absolute top-4 right-4 text-white text-2xl w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition"
+            onClick={() => setLightboxSrc(null)}
+          >×</button>
           <img
-            src={lightbox.public_url}
+            src={lightboxSrc}
             alt=""
-            className="max-w-full max-h-full rounded-lg shadow-2xl"
+            className="max-w-full max-h-full rounded-xl shadow-2xl"
             onClick={e => e.stopPropagation()}
           />
         </div>
@@ -192,6 +349,8 @@ export default function TrackPage() {
   const isClosed = incident.status === 'CLOSED'
   const showResourceBoard = !isClosed && ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status)
   const mediaItems: IncidentMedia[] = incident.media ?? []
+  const [liveMediaUrls, setLiveMediaUrls] = useState<string[] | null>(null)
+  const mediaUrls = liveMediaUrls ?? (incident.media_urls ?? [])
 
   return (
     <div className="min-h-screen bg-bg font-sans">
@@ -246,7 +405,12 @@ export default function TrackPage() {
         </div>
 
         {/* Media gallery */}
-        {mediaItems.length > 0 && <MediaGallery media={mediaItems} />}
+        <MediaGallery
+          media={mediaItems}
+          mediaUrls={mediaUrls}
+          incidentId={id!}
+          onUrlsChanged={setLiveMediaUrls}
+        />
 
         {/* Map */}
         {incident.location_lat && incident.location_lng && (

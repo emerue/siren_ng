@@ -198,6 +198,7 @@ export interface SubscriptionAlert {
 export interface ZoneHistory {
   zone_name: string
   total_incidents: number
+  total_incidents_effective: number
   by_type: Record<string, number>
   by_year: Array<{ year: number; count: number }>
   resolution_rate: number

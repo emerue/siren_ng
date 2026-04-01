@@ -365,22 +365,39 @@ def zone_history(request):
     else:
         trend = "increasing"
 
-    if total_all == 0:
+    years_span = max(1, (now - since_2010).days / 365)
+
+    # Generic "Lagos" incidents have no specific zone tag (RSS headlines that just say "Lagos").
+    # Apportion them evenly across ~20 major zones so the score reflects real city-level risk.
+    # This prevents zones with sparse specific data from falsely scoring near 100.
+    generic_lagos_count = Incident.objects.filter(
+        zone_name__in=["Lagos", "Lagos Mainland", ""],
+        status="RESOLVED",
+        created_at__gte=since_2010,
+    ).count()
+    lagos_zone_share = round(generic_lagos_count / 20)  # ~5% of citywide incidents per zone
+
+    # Effective total for scoring = zone-specific documented + proportional citywide share
+    effective_total = total + lagos_zone_share
+
+    if effective_total == 0:
         zone_score = 95
     else:
-        years_span = max(1, (now - since_2010).days / 365)
-        per_year = total / years_span
-        freq_penalty = min(35, per_year * 1.5)
+        # Calibrated for Lagos: 3 incidents/year = moderate risk (~70 score)
+        # At 1/yr → ~83, at 5/yr → ~55, at 10/yr → ~35
+        per_year_eff = effective_total / years_span
+        freq_penalty = min(70, per_year_eff * 8)
         crit_high = qs.filter(severity__in=["CRITICAL", "HIGH"]).count()
-        sev_penalty = min(20, (crit_high / max(total, 1)) * 30)
-        res_bonus = (resolution_rate / 100) * 15
-        zone_score = int(max(0, min(100, round(100 - 10 - freq_penalty - sev_penalty + res_bonus))))
+        sev_penalty = min(15, (crit_high / max(total, 1)) * 20)
+        res_bonus = (resolution_rate / 100) * 10
+        zone_score = int(max(20, min(95, round(95 - freq_penalty - sev_penalty + res_bonus))))
 
     recent_5 = IncidentSerializer(qs.order_by("-created_at")[:5], many=True).data
 
     return Response({
         "zone_name": display_zone,
         "total_incidents": total,
+        "total_incidents_effective": effective_total,
         "by_type": by_type,
         "by_year": by_year,
         "resolution_rate": resolution_rate,

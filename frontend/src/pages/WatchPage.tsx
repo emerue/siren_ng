@@ -195,8 +195,8 @@ function SubRow({
       >
         <span className="text-xs" style={{ color: trendColor }}>{trendText}</span>
         <span className="text-xs text-gray-400 flex items-center gap-1">
-          {data?.total_incidents !== undefined
-            ? `${data.total_incidents} incidents since 2010`
+          {data
+            ? `${data.total_incidents_effective ?? data.total_incidents} incidents since 2010 · ${data.zone_name}`
             : 'View zone history'}
           <span>›</span>
         </span>

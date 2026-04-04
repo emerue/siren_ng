@@ -7,6 +7,13 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task
+def handle_whatsapp_message(from_number, body, media_urls, location):
+    """Wrapper so route_inbound runs in a Celery worker, not in the Twilio request cycle."""
+    from apps.whatsapp.handlers import route_inbound
+    route_inbound(from_number, body, media_urls or [], location)
+
+
+@shared_task
 def send_whatsapp_text(to_number, message):
     """Base Twilio send — all outbound messages go through here."""
     try:

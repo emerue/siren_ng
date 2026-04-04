@@ -1,3 +1,4 @@
+import ssl
 from pathlib import Path
 from decouple import config
 import dj_database_url
@@ -74,14 +75,23 @@ DATABASES = {
 _REDIS_URL = config("REDIS_URL", default="")
 
 if _REDIS_URL:
+    CELERY_BROKER_URL = _REDIS_URL
+    CELERY_RESULT_BACKEND = _REDIS_URL
+
+    if _REDIS_URL.startswith("rediss://"):
+        CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
+        CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
+
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [_REDIS_URL]},
+            "CONFIG": {
+                "hosts": [{"address": _REDIS_URL, "ssl": True}]
+                if _REDIS_URL.startswith("rediss://")
+                else [_REDIS_URL],
+            },
         }
     }
-    CELERY_BROKER_URL = _REDIS_URL
-    CELERY_RESULT_BACKEND = _REDIS_URL
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",

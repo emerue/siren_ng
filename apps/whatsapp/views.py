@@ -29,6 +29,8 @@ def whatsapp_ingest(request):
         from twilio.request_validator import RequestValidator
         validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
         url = request.build_absolute_uri()
+        if url.startswith('http://'):
+            url = 'https://' + url[7:]
         signature = request.META.get('HTTP_X_TWILIO_SIGNATURE', '')
         params = dict(request.POST)
         # request.POST is a QueryDict — convert to plain dict of single values
@@ -62,12 +64,12 @@ def whatsapp_ingest(request):
         except ValueError:
             pass
 
-    # Route in background
+    # Route in background via Celery — avoids Twilio 15s timeout
     try:
-        from apps.whatsapp.handlers import route_inbound
-        route_inbound(from_number, body, media_urls, location)
+        from apps.whatsapp.tasks import handle_whatsapp_message
+        handle_whatsapp_message.delay(from_number, body, media_urls, location)
     except Exception as exc:
-        logger.exception("route_inbound error: %s", exc)
+        logger.exception("Failed to queue whatsapp task: %s", exc)
 
     return HttpResponse('', status=200)
 

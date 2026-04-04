@@ -26,7 +26,7 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 RUN mkdir -p staticfiles
 
 # Make startup script executable
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh /app/start-worker.sh
 
 EXPOSE 8080
 

@@ -51,6 +51,15 @@ Analyse this report and respond ONLY with valid JSON. No markdown. No explanatio
 Report: {incident.description}
 Location text: {incident.address_text}
 
+IMPORTANT CONTEXT:
+- Reports come from Lagos residents via WhatsApp. They are often short and informal.
+- A neighbourhood name, market name, bus stop, or street is sufficient location detail.
+- Do NOT require GPS coordinates, casualty counts, or formal language.
+- A single sentence like "fire at Yaba market" from a real Lagos location is eligible.
+- Set eligible=true if the report describes a plausible real emergency, even if brief.
+- Only set eligible=false if the report is clearly a test, joke, or completely unintelligible.
+- fraud_score should be low (under 0.3) for any report with a recognisable Lagos location.
+
 Return this exact JSON:
 {{
   "eligible": true or false,
@@ -89,7 +98,7 @@ power line, NEPA, EKEDC, fallen cable, or electrical infrastructure of any kind.
     incident.severity      = result.get('severity', 'MEDIUM')
     incident.set_vouch_threshold()
 
-    if incident.ai_confidence >= 0.75:
+    if incident.ai_confidence >= 0.65:
         _transition(incident, 'VERIFIED', 'AI',
                     f'Auto-verified. Confidence: {incident.ai_confidence:.2f}')
         incident.save()

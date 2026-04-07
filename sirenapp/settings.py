@@ -86,9 +86,7 @@ if _REDIS_URL:
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {
-                "hosts": [{"address": _REDIS_URL, "ssl": True}]
-                if _REDIS_URL.startswith("rediss://")
-                else [_REDIS_URL],
+                "hosts": [_REDIS_URL],
             },
         }
     }

@@ -1,22 +1,35 @@
 from django.contrib import admin
 from .models import Incident, ResponseLog, VouchRecord, IncidentMedia
+from .forms import IncidentMediaAdminForm
 
 
-class IncidentMediaInline(admin.TabularInline):
+class IncidentMediaInline(admin.StackedInline):
     model = IncidentMedia
-    readonly_fields = ["media_type", "public_url", "storage_path", "file_size", "uploaded_by_hash", "upload_timestamp"]
-    extra = 0
+    form = IncidentMediaAdminForm
+    extra = 1
     can_delete = True
+    readonly_fields = ["public_url", "storage_path", "file_size", "uploaded_by_hash", "upload_timestamp"]
+    fields = [
+        "upload_file",
+        "external_url",
+        "media_type",
+        "caption",
+        "public_url",
+        "storage_path",
+        "file_size",
+        "upload_timestamp",
+    ]
 
 
 @admin.register(Incident)
 class IncidentAdmin(admin.ModelAdmin):
     inlines = [IncidentMediaInline]
-    list_display  = ["id", "incident_type", "severity", "status", "zone_name",
-                     "is_infrastructure", "vouch_count", "ai_confidence", "fraud_score",
-                     "total_donations_kobo", "created_at"]
-    list_filter   = ["status", "incident_type", "severity", "source", "is_infrastructure"]
-    search_fields = ["description", "address_text", "zone_name"]
+    list_display  = ["id", "incident_type", "severity", "status", "lga", "zone_name",
+                     "is_historical", "verified", "date_occurred",
+                     "vouch_count", "ai_confidence", "created_at"]
+    list_filter   = ["status", "incident_type", "severity", "source",
+                     "is_historical", "verified", "is_infrastructure", "lga"]
+    search_fields = ["description", "address_text", "zone_name", "lga", "source_url"]
     ordering      = ["-created_at"]
     readonly_fields = ["id", "reporter_hash", "ai_raw_response", "media_urls", "created_at", "updated_at"]
     actions       = ["mark_verified", "mark_resolved", "mark_rejected", "run_ai_verification"]

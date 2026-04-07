@@ -38,32 +38,38 @@ class IncidentListView(generics.ListAPIView):
     pagination_class = IncidentPagination
 
     def get_queryset(self):
-        cutoff = timezone.now() - timedelta(days=30)
         historical = self.request.query_params.get("historical")
 
         if historical == "true":
-            # Only old resolved incidents (seeded/historical data)
-            qs = Incident.objects.filter(status="RESOLVED", created_at__lt=cutoff)
+            # Flagged historical incidents only
+            qs = Incident.objects.filter(is_historical=True, status="RESOLVED")
         else:
             qs = Incident.objects.filter(
                 status__in=["VERIFIED", "RESPONDING", "AGENCY_NOTIFIED", "RESOLVED"]
             )
             if historical == "false":
-                # Exclude old resolved - live feed only
-                qs = qs.exclude(status="RESOLVED", created_at__lt=cutoff)
+                # Live feed — exclude historical
+                qs = qs.exclude(is_historical=True)
 
         if zone := self.request.query_params.get("zone_name"):
             qs = qs.filter(zone_name__icontains=zone)
+        if lga := self.request.query_params.get("lga"):
+            qs = qs.filter(lga__icontains=lga)
         if s := self.request.query_params.get("status"):
             qs = qs.filter(status=s)
         if t := self.request.query_params.get("incident_type"):
             qs = qs.filter(incident_type=t)
         if sev := self.request.query_params.get("severity"):
             qs = qs.filter(severity=sev)
+        # year_from/year_to: prefer date_occurred for historical, fall back to created_at year
         if yr_from := self.request.query_params.get("year_from"):
-            qs = qs.filter(created_at__year__gte=int(yr_from))
+            yr = int(yr_from)
+            from django.db.models import Q
+            qs = qs.filter(Q(date_occurred__year__gte=yr) | Q(date_occurred__isnull=True, created_at__year__gte=yr))
         if yr_to := self.request.query_params.get("year_to"):
-            qs = qs.filter(created_at__year__lte=int(yr_to))
+            yr = int(yr_to)
+            from django.db.models import Q
+            qs = qs.filter(Q(date_occurred__year__lte=yr) | Q(date_occurred__isnull=True, created_at__year__lte=yr))
         return qs
 
 
@@ -348,15 +354,16 @@ def zone_history(request):
         # Combine: coordinate-matched incidents + zone-name-matched historical incidents
         from django.db.models import Q
         filter_q = Q(id__in=nearby_ids) | Q(zone_name__icontains=nearest_zone)
-        qs = Incident.objects.filter(filter_q, status="RESOLVED", created_at__gte=since_2010)
+        qs = Incident.objects.filter(
+            filter_q, status="RESOLVED",
+        ).filter(Q(is_historical=True) | Q(date_occurred__isnull=False) | Q(created_at__gte=since_2010))
         all_zone = Incident.objects.filter(filter_q)
         display_zone = nearest_zone
     else:
         qs = Incident.objects.filter(
             zone_name__icontains=zone_name,
             status="RESOLVED",
-            created_at__gte=since_2010,
-        )
+        ).filter(Q(is_historical=True) | Q(date_occurred__isnull=False) | Q(created_at__gte=since_2010))
         all_zone = Incident.objects.filter(zone_name__icontains=zone_name)
         display_zone = zone_name
 

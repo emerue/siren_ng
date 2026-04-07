@@ -5,23 +5,23 @@ from .models import Incident, ResponseLog, VouchRecord, IncidentMedia
 
 
 def _resolved_to_closed(obj):
-    if obj.status == 'RESOLVED':
+    if obj.status == "RESOLVED":
         cutoff = timezone.now() - timedelta(days=30)
         if obj.created_at < cutoff:
-            return 'CLOSED'
+            return "CLOSED"
     return obj.status
 
 
 class ResponseLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = ResponseLog
-        fields = '__all__'
+        fields = "__all__"
 
 
 class IncidentMediaSerializer(serializers.ModelSerializer):
     class Meta:
         model = IncidentMedia
-        fields = ['id', 'media_type', 'public_url', 'file_size', 'upload_timestamp']
+        fields = ["id", "media_type", "public_url", "file_size", "caption", "upload_timestamp"]
 
 
 class IncidentSerializer(serializers.ModelSerializer):
@@ -33,7 +33,7 @@ class IncidentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Incident
-        fields = '__all__'
+        fields = "__all__"
 
 
 class IncidentDetailSerializer(serializers.ModelSerializer):
@@ -47,4 +47,4 @@ class IncidentDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Incident
-        fields = '__all__'
+        fields = "__all__"

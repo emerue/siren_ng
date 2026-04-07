@@ -31,8 +31,12 @@ class IncidentStatus(models.TextChoices):
 
 class Incident(models.Model):
     id            = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    source        = models.CharField(max_length=20,
-                      choices=[('WHATSAPP', 'WhatsApp'), ('WEB', 'Web Portal')])
+    SOURCE_CHOICES = [
+        ('WHATSAPP',    'WhatsApp'),
+        ('WEB',         'Web Portal'),
+        ('NEWS_SCRAPE', 'News Scrape'),
+    ]
+    source        = models.CharField(max_length=20, choices=SOURCE_CHOICES)
     external_id   = models.CharField(max_length=200, blank=True)
     reporter_hash = models.CharField(max_length=64)
     reporter_phone = models.CharField(max_length=20, blank=True)
@@ -48,6 +52,16 @@ class Incident(models.Model):
     location_lng  = models.FloatField(null=True, blank=True)
     address_text  = models.CharField(max_length=500, blank=True)
     zone_name     = models.CharField(max_length=100, blank=True)
+    lga           = models.CharField(max_length=100, blank=True, db_index=True)
+
+    # Historical / news-scraped fields
+    is_historical    = models.BooleanField(default=False, db_index=True)
+    verified         = models.BooleanField(default=False)
+    source_url       = models.URLField(max_length=1000, blank=True)
+    date_occurred    = models.DateField(null=True, blank=True, db_index=True)
+    affected_count   = models.PositiveIntegerField(null=True, blank=True)
+    casualties       = models.PositiveIntegerField(null=True, blank=True)
+    injuries         = models.PositiveIntegerField(null=True, blank=True)
 
     media_urls    = models.JSONField(default=list)
 
@@ -74,6 +88,12 @@ class Incident(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['zone_name', 'status']),
+            models.Index(fields=['lga', 'status']),
+            models.Index(fields=['is_historical', 'status']),
+            models.Index(fields=['date_occurred']),
+        ]
 
     @property
     def vouch_threshold_for_severity(self):
@@ -121,15 +141,20 @@ class VouchRecord(models.Model):
 
 
 class IncidentMedia(models.Model):
-    """Structured media record — image or video attached to an incident."""
-    MEDIA_TYPE_CHOICES = [('image', 'Image'), ('video', 'Video')]
+    """Structured media record — image, video, or external URL attached to an incident."""
+    MEDIA_TYPE_CHOICES = [
+        ('image', 'Image'),
+        ('video', 'Video'),
+        ('url',   'External URL'),
+    ]
 
     incident         = models.ForeignKey(Incident, on_delete=models.CASCADE,
                          related_name='media')
     media_type       = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES)
-    public_url       = models.URLField(max_length=500)
-    storage_path     = models.CharField(max_length=500)
-    file_size        = models.PositiveIntegerField()
+    public_url       = models.URLField(max_length=1000)
+    storage_path     = models.CharField(max_length=500, blank=True)
+    file_size        = models.PositiveIntegerField(null=True, blank=True)  # null for URL-only entries
+    caption          = models.CharField(max_length=500, blank=True)
     uploaded_by_hash = models.CharField(max_length=64, blank=True)
     upload_timestamp = models.DateTimeField(auto_now_add=True)
 

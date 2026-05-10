@@ -366,8 +366,75 @@ def handle_location_share(from_number, location, body):
             _save_commute_subscription(from_number, state)
             return
 
-    # Not onboarding -- treat as incident report with location
-    create_incident_from_message(from_number, body or 'Emergency reported', [], location)
+    # Not onboarding — delegate to location message handler (BRD 11.16)
+    handle_location_message(from_number, location.get('latitude'), location.get('longitude'))
+
+
+# -- Location message handler (BRD 11.16) --------------------------------------
+
+def handle_location_message(from_number, latitude, longitude):
+    """
+    Process WhatsApp location messages (static or live location sharing).
+
+    Associates location with the user's most recent active incident.
+    Only saves the first location received to prevent drift for static incidents.
+
+    Returns:
+        bool: True if location was saved, False if ignored
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+
+    cutoff_time = timezone.now() - timedelta(minutes=10)
+
+    try:
+        recent_incident = Incident.objects.filter(
+            reporter_phone=from_number,
+            status__in=['DETECTED', 'VERIFYING', 'VERIFIED'],
+            created_at__gte=cutoff_time,
+        ).order_by('-created_at').first()
+    except Exception as e:
+        logger.error("handle_location_message: Error querying incidents: %s", e)
+        return False
+
+    if not recent_incident:
+        logger.info(
+            "handle_location_message: No recent incident found for %s", from_number
+        )
+        return False
+
+    if recent_incident.location_lat and recent_incident.location_lng:
+        logger.info(
+            "handle_location_message: Location ignored for incident %s: coordinates already set",
+            recent_incident.id,
+        )
+        return False
+
+    try:
+        recent_incident.location_lat = float(latitude)
+        recent_incident.location_lng = float(longitude)
+        recent_incident.save(update_fields=['location_lat', 'location_lng', 'updated_at'])
+
+        logger.info(
+            "handle_location_message: Location saved for incident %s: %s, %s",
+            recent_incident.id, latitude, longitude,
+        )
+
+        send_whatsapp_text.delay(from_number, "\U0001f4cd Location saved. Thank you.")
+        return True
+
+    except (ValueError, TypeError) as e:
+        logger.error(
+            "handle_location_message: Invalid coordinates for %s: lat=%s, lng=%s, error=%s",
+            recent_incident.id, latitude, longitude, e,
+        )
+        return False
+    except Exception as e:
+        logger.error(
+            "handle_location_message: Failed to save location for %s: %s",
+            recent_incident.id, e,
+        )
+        return False
 
 
 # -- Subscription (WATCH) flow -------------------------------------------------

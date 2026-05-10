@@ -75,11 +75,20 @@ def route_inbound(from_number, body, media_urls, location):
     if body_upper == 'REGISTER ORG':
         return start_org_registration(from_number)
 
+    # LGA Guardian Mode subscription commands
+    if body_upper.startswith('WATCH '):
+        handle_subscribe_command(from_number, body[6:].strip())
+        return
     if body_upper == 'WATCH':
-        return start_subscription_flow(from_number)
+        send_available_lgas(from_number)
+        return
     if body_upper == 'MY ALERTS':
         return show_subscriptions(from_number)
-    if body_upper.startswith('STOP'):
+
+    # STOP <LGA or label>: try LGA unsubscribe first, fall back to COMMUTE label
+    if body_upper.startswith('STOP '):
+        return handle_unsubscribe_command(from_number, body[5:].strip())
+    if body_upper == 'STOP':
         return handle_stop_command(from_number, body)
 
     if body_upper.startswith('VOUCH'):
@@ -368,6 +377,108 @@ def handle_location_share(from_number, location, body):
 
     # Not onboarding — delegate to location message handler (BRD 11.16)
     handle_location_message(from_number, location.get('latitude'), location.get('longitude'))
+
+
+# -- LGA Guardian Mode commands ------------------------------------------------
+
+AVAILABLE_LGAS = [
+    'Agege', 'Ajeromi-Ifelodun', 'Alimosho', 'Amuwo-Odofin', 'Apapa',
+    'Badagry', 'Epe', 'Eti-Osa', 'Ibeju-Lekki', 'Ifako-Ijaiye',
+    'Ikorodu', 'Ikeja', 'Kosofe', 'Lagos Island', 'Lagos Mainland',
+    'Mushin', 'Ojo', 'Oshodi-Isolo', 'Shomolu', 'Somolu', 'Surulere',
+]
+
+
+def send_available_lgas(from_number):
+    """Reply with the list of Lagos LGAs a user can subscribe to."""
+    lga_list = '\n'.join(f'• {lga}' for lga in AVAILABLE_LGAS)
+    send_whatsapp_text.delay(
+        from_number,
+        f"Guardian Mode — Lagos LGA Alerts\n\n"
+        f"To subscribe to an LGA, text:\n"
+        f"WATCH <LGA name>\n\n"
+        f"Example: WATCH Surulere\n\n"
+        f"Available LGAs:\n{lga_list}\n\n"
+        f"To unsubscribe: STOP <LGA name>"
+    )
+
+
+def handle_subscribe_command(from_number, lga):
+    """Subscribe the sender to Guardian Mode alerts for a Lagos LGA."""
+    from apps.subscriptions.tasks import normalize_lga_name
+    from apps.subscriptions.models import LGASubscription
+    from django.contrib.auth import get_user_model
+
+    if not lga:
+        send_available_lgas(from_number)
+        return
+
+    normalized = normalize_lga_name(lga)
+    if not normalized or normalized not in AVAILABLE_LGAS:
+        send_whatsapp_text.delay(
+            from_number,
+            f"'{lga}' is not a recognised Lagos LGA.\n\n"
+            f"Text WATCH to see the full list."
+        )
+        return
+
+    User = get_user_model()
+    user, _ = User.objects.get_or_create(username=from_number)
+
+    sub, created = LGASubscription.objects.get_or_create(
+        user=user,
+        lga=normalized,
+        defaults={'is_active': True, 'whatsapp_number': from_number},
+    )
+
+    if not created and sub.is_active:
+        msg = f"You are already subscribed to {normalized} alerts."
+    else:
+        if not created:
+            sub.is_active = True
+            sub.whatsapp_number = from_number
+            sub.save(update_fields=['is_active', 'whatsapp_number', 'updated_at'])
+        msg = (
+            f"Subscribed to {normalized} alerts.\n\n"
+            f"You will receive a WhatsApp message whenever an emergency is "
+            f"verified in {normalized}.\n\n"
+            f"To unsubscribe: STOP {normalized}"
+        )
+
+    send_whatsapp_text.delay(from_number, msg)
+
+
+def handle_unsubscribe_command(from_number, term):
+    """
+    Unsubscribe from a Guardian Mode LGA alert.
+    Falls back to the old COMMUTE label stop if no LGA subscription is found.
+    """
+    from apps.subscriptions.tasks import normalize_lga_name
+    from apps.subscriptions.models import LGASubscription
+    from django.contrib.auth import get_user_model
+
+    normalized = normalize_lga_name(term)
+    if normalized:
+        User = get_user_model()
+        try:
+            user = User.objects.get(username=from_number)
+            sub = LGASubscription.objects.filter(
+                user=user, lga=normalized, is_active=True
+            ).first()
+            if sub:
+                sub.is_active = False
+                sub.save(update_fields=['is_active', 'updated_at'])
+                send_whatsapp_text.delay(
+                    from_number,
+                    f"Unsubscribed from {normalized} alerts.\n\n"
+                    f"Text WATCH {normalized} to resubscribe."
+                )
+                return
+        except Exception:
+            pass
+
+    # No LGA match — fall back to COMMUTE label stop
+    handle_stop_command(from_number, f'STOP {term}')
 
 
 # -- Location message handler (BRD 11.16) --------------------------------------

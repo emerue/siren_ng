@@ -134,7 +134,7 @@ def create_incident_from_message(from_number, body, media_urls, location):
     kwargs = dict(
         source='WHATSAPP',
         reporter_hash=phone_hash,
-        reporter_phone=from_number,
+        # reporter_phone intentionally omitted — store hash only, never raw phone
         description=body,
         media_urls=media_urls or [],
         status='DETECTED',
@@ -497,10 +497,11 @@ def handle_location_message(from_number, latitude, longitude):
     from datetime import timedelta
 
     cutoff_time = timezone.now() - timedelta(minutes=10)
+    phone_hash = hashlib.sha256(from_number.encode()).hexdigest()
 
     try:
         recent_incident = Incident.objects.filter(
-            reporter_phone=from_number,
+            reporter_hash=phone_hash,
             status__in=['DETECTED', 'VERIFYING', 'VERIFIED'],
             created_at__gte=cutoff_time,
         ).order_by('-created_at').first()

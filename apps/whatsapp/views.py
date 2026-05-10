@@ -1,6 +1,7 @@
 import hashlib
 import logging
 
+from django.core.cache import cache
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -15,6 +16,20 @@ from apps.incidents.models import Incident
 from apps.incidents.tasks import verify_incident_ai
 
 logger = logging.getLogger(__name__)
+
+
+def _wa_rate_limit(from_number: str, rate: int = 10, window: int = 60) -> bool:
+    """
+    Cache-based rate limiter keyed by sender phone number.
+    Returns True if the request should be blocked (rate exceeded).
+    10 messages per 60-second window per WhatsApp number.
+    """
+    key = f'wa_rl:{hashlib.sha256(from_number.encode()).hexdigest()[:16]}'
+    count = cache.get(key, 0)
+    if count >= rate:
+        return True
+    cache.set(key, count + 1, window)
+    return False
 
 
 @csrf_exempt
@@ -47,6 +62,11 @@ def whatsapp_ingest(request):
     from_raw = request.POST.get('From', '')
     from_number = from_raw.replace('whatsapp:', '')
     body = request.POST.get('Body', '').strip()
+
+    # Rate limit: 10 messages/min per sender
+    if _wa_rate_limit(from_number):
+        logger.warning("Rate limit exceeded for %s", from_number[:6] + '****')
+        return HttpResponse('', status=200)  # Return 200 so Twilio doesn't retry
 
     num_media = int(request.POST.get('NumMedia', 0))
     media_urls = [

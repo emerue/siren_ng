@@ -9,6 +9,7 @@ from rest_framework.response import Response
 
 from .models import LocationSubscription, LGASubscription, SubscriptionAlert, SafetyScoreLog
 from .serializers import LocationSubscriptionSerializer, LGASubscriptionSerializer
+# LocationSubscriptionSerializer kept for commute_create response
 
 
 AVAILABLE_LGAS = sorted([
@@ -57,60 +58,6 @@ class LGASubscriptionViewSet(viewsets.ModelViewSet):
         return Response({'lgas': AVAILABLE_LGAS})
 
 
-@api_view(['GET', 'POST'])
-@permission_classes([AllowAny])
-def subscription_list_create(request):
-    if request.method == 'GET':
-        phone_hash = request.query_params.get('phone_hash', '')
-        if not phone_hash:
-            return Response({'error': 'phone_hash query param is required'}, status=400)
-        subs = LocationSubscription.objects.filter(phone_hash=phone_hash)
-        serializer = LocationSubscriptionSerializer(subs, many=True)
-        return Response(serializer.data)
-
-    # POST -- create subscription
-    data = request.data
-    whatsapp_number = data.get('whatsapp_number', '').strip()
-    if not whatsapp_number:
-        return Response({'error': 'whatsapp_number is required'}, status=400)
-
-    phone_hash = hashlib.sha256(whatsapp_number.encode()).hexdigest()
-
-    serializer = LocationSubscriptionSerializer(data={
-        'whatsapp_number': whatsapp_number,
-        'label': data.get('label', 'My location'),
-        'location_type': data.get('location_type', 'HOME'),
-        'location_lat': data.get('location_lat'),
-        'location_lng': data.get('location_lng'),
-        'alert_radius_km': data.get('alert_radius_km', 1.0),
-        'incident_types': data.get('incident_types', []),
-    })
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=400)
-
-    sub = serializer.save(phone_hash=phone_hash)
-    return Response(LocationSubscriptionSerializer(sub).data, status=201)
-
-
-@api_view(['PATCH', 'DELETE'])
-@permission_classes([AllowAny])
-def subscription_detail(request, pk):
-    try:
-        sub = LocationSubscription.objects.get(pk=pk)
-    except LocationSubscription.DoesNotExist:
-        return Response({'error': 'Subscription not found'}, status=404)
-
-    if request.method == 'DELETE':
-        sub.delete()
-        return Response(status=204)
-
-    # PATCH
-    allowed = ['label', 'alert_radius_km', 'is_active', 'incident_types', 'address_text']
-    for field in allowed:
-        if field in request.data:
-            setattr(sub, field, request.data[field])
-    sub.save()
-    return Response(LocationSubscriptionSerializer(sub).data)
 
 
 @api_view(['POST'])

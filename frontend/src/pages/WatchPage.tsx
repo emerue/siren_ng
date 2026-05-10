@@ -1,13 +1,9 @@
 import { useState } from 'react'
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { createSubscription, getSubscriptions, updateSubscription, deleteSubscription, getZoneHistory } from '../api'
-import type { LocationSubscription, ZoneHistory } from '../types'
-import { createHash } from '../utils/hash'
 import Nav from '../components/Nav'
-import ZoneHistoryPanel from '../components/ZoneHistoryPanel'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -15,8 +11,6 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
-
-// Extract Lagos zone name from a free-text label
 
 function PinPicker({ onSelect }: { onSelect: (lat: number, lng: number) => void }) {
   useMapEvents({ click(e) { onSelect(e.latlng.lat, e.latlng.lng) } })
@@ -88,164 +82,8 @@ function CommuteForm() {
   )
 }
 
-function scoreColor(score: number) {
-  if (score >= 85) return '#0D9488'
-  if (score >= 60) return '#D97706'
-  return '#EA580C'
-}
-
-// Compact ring — 64x64 SVG, used inline inside the subscription row
-function MiniScoreRing({ score }: { score: number }) {
-  const r = 24
-  const circ = 2 * Math.PI * r
-  const color = scoreColor(score)
-  return (
-    <svg width="64" height="64" viewBox="0 0 64 64" aria-label={`Safety score ${score}`}>
-      <circle cx="32" cy="32" r={r} fill="none" stroke="#E5E7EB" strokeWidth="5" />
-      <circle
-        cx="32" cy="32" r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth="5"
-        strokeDasharray={circ}
-        strokeDashoffset={circ * (1 - score / 100)}
-        strokeLinecap="round"
-        style={{ transform: 'rotate(-90deg)', transformOrigin: '32px 32px' }}
-      />
-      <text x="32" y="32" textAnchor="middle" dominantBaseline="central" fill={color} fontSize="14" fontWeight="700" fontFamily="Inter, system-ui, sans-serif">
-        {score}
-      </text>
-    </svg>
-  )
-}
-
-// Combined score + controls card — replaces the separate grid + compact rows
-function SubRow({
-  sub,
-  onOpenHistory,
-  onPause,
-  onDelete,
-  isPausing,
-  isDeleting,
-}: {
-  sub: LocationSubscription
-  onOpenHistory: (lat: number | null, lng: number | null, radiusKm: number, label: string) => void
-  onPause: (id: string, next: boolean) => void
-  onDelete: (id: string) => void
-  isPausing: boolean
-  isDeleting: boolean
-}) {
-  const { data } = useQuery<ZoneHistory>({
-    queryKey: ['zone-history', sub.location_lat, sub.location_lng],
-    queryFn: () => getZoneHistory({ lat: sub.location_lat ?? undefined, lng: sub.location_lng ?? undefined, radiusKm: sub.alert_radius_km }),
-    enabled: sub.location_lat != null && sub.location_lng != null,
-    staleTime: 10 * 60 * 1000,
-  })
-  const score = data?.zone_score ?? sub.safety_score ?? 80
-  const color = scoreColor(score)
-  const safetyLabel = score >= 85 ? 'Well monitored' : score >= 60 ? 'Moderate activity' : 'High-activity area'
-  const trendText = data?.trend === 'improving' ? '↓ Safer than last year'
-    : data?.trend === 'increasing' ? '↑ More active than last year'
-    : '→ Activity stable'
-  const trendColor = data?.trend === 'improving' ? '#0D9488' : data?.trend === 'increasing' ? '#D97706' : '#6B7280'
-
-  return (
-    <div className="border border-border rounded-xl overflow-hidden">
-      {/* Top row: ring + info + controls */}
-      <div className="flex items-center gap-3 p-3">
-        {/* Score ring — tappable */}
-        <button
-          onClick={() => onOpenHistory(sub.location_lat, sub.location_lng, sub.alert_radius_km, sub.label)}
-          className="shrink-0 hover:opacity-80 transition"
-          title="View zone history"
-        >
-          <MiniScoreRing score={score} />
-        </button>
-
-        {/* Location info */}
-        <div className="flex-1 min-w-0">
-          <div className="font-semibold text-textPrimary text-sm truncate">{sub.label}</div>
-          <div className="text-xs text-textMuted">{sub.location_type} · {sub.alert_radius_km}km · {sub.is_active ? 'Active' : 'Paused'}</div>
-          <div className="text-xs mt-0.5" style={{ color }}>{safetyLabel}</div>
-        </div>
-
-        {/* Controls */}
-        <div className="flex gap-1.5 shrink-0">
-          <button
-            onClick={() => onPause(sub.id, !sub.is_active)}
-            disabled={isPausing}
-            className="text-xs border border-border px-2 py-1 rounded hover:border-primary disabled:opacity-50"
-          >
-            {sub.is_active ? 'Pause' : 'Resume'}
-          </button>
-          <button
-            onClick={() => onDelete(sub.id)}
-            disabled={isDeleting}
-            className="text-xs text-red-600 border border-red-200 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50"
-          >
-            Delete
-          </button>
-        </div>
-      </div>
-
-      {/* Bottom row: trend + view history link */}
-      <button
-        onClick={() => onOpenHistory(sub.location_lat, sub.location_lng, sub.alert_radius_km, sub.label)}
-        className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 border-t border-border text-left hover:bg-gray-100 transition"
-      >
-        <span className="text-xs" style={{ color: trendColor }}>{trendText}</span>
-        <span className="text-xs text-gray-400 flex items-center gap-1">
-          {data
-            ? `${data.total_incidents_effective ?? data.total_incidents} incidents since 2010 · ${data.zone_name}`
-            : 'View zone history'}
-          <span>›</span>
-        </span>
-      </button>
-    </div>
-  )
-}
 
 export default function WatchPage() {
-  const qc = useQueryClient()
-  const [managePhone, setManagePhone] = useState('')
-  const [manageHash, setManageHash] = useState('')
-  const [historyPanel, setHistoryPanel] = useState<{ lat: number | null; lng: number | null; radiusKm: number; label: string } | null>(null)
-  const [form, setForm] = useState({
-    whatsapp_number: '', label: '', location_type: 'HOME',
-    location_lat: null as number | null, location_lng: null as number | null,
-    alert_radius_km: 1.0, incident_types: [] as string[],
-  })
-
-  const createMut = useMutation({
-    mutationFn: () => createSubscription(form),
-    onSuccess: () => {
-      alert('Location saved! You will receive WhatsApp alerts for incidents in your chosen radius.')
-      setForm({ whatsapp_number: '', label: '', location_type: 'HOME', location_lat: null, location_lng: null, alert_radius_km: 1.0, incident_types: [] })
-    },
-  })
-
-  const { data: subs = [], isLoading: loadingSubs } = useQuery<LocationSubscription[]>({
-    queryKey: ['subscriptions', manageHash],
-    queryFn: () => getSubscriptions(manageHash),
-    enabled: !!manageHash,
-  })
-
-  const deleteMut = useMutation({
-    mutationFn: (id: string) => deleteSubscription(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['subscriptions', manageHash] }),
-  })
-
-  const pauseMut = useMutation({
-    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
-      updateSubscription(id, { is_active }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['subscriptions', manageHash] }),
-  })
-
-  async function handleLookup() {
-    const hash = await createHash(managePhone)
-    setManageHash(hash)
-  }
-
   return (
     <div className="min-h-screen bg-bg font-sans">
       <Nav />
@@ -269,112 +107,6 @@ export default function WatchPage() {
           </div>
         </div>
 
-        {/* Save a location form */}
-        <div className="bg-white rounded-xl border border-border p-5">
-          <h3 className="font-bold mb-4">Save a location to watch</h3>
-          <input
-            value={form.whatsapp_number}
-            onChange={(e) => setForm((f) => ({ ...f, whatsapp_number: e.target.value }))}
-            placeholder="WhatsApp number for alerts (e.g. +2348012345678)"
-            className="w-full border border-border rounded-lg p-3 text-sm mb-3"
-          />
-          <input
-            value={form.label}
-            onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-            placeholder="Location name (e.g. My house, Timi school Surulere)"
-            className="w-full border border-border rounded-lg p-3 text-sm mb-3"
-          />
-          <select
-            value={form.location_type}
-            onChange={(e) => setForm((f) => ({ ...f, location_type: e.target.value }))}
-            className="w-full border border-border rounded-lg p-3 text-sm mb-3"
-          >
-            {[['HOME','Home'],['SCHOOL','School/Child location'],['LAND','Land/Property'],['OFFICE','Office'],['FAMILY','Family member location'],['OTHER','Other']].map(([v, l]) => (
-              <option key={v} value={v}>{l}</option>
-            ))}
-          </select>
-
-          <p className="text-textMuted text-xs mb-2">Tap the map to pin the location</p>
-          <div className="rounded-xl overflow-hidden border border-border mb-3" style={{ height: 200 }}>
-            <MapContainer center={[6.5244, 3.3792]} zoom={12} style={{ height: '100%', width: '100%' }}>
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-              <PinPicker onSelect={(lat, lng) => setForm((f) => ({ ...f, location_lat: lat, location_lng: lng }))} />
-              {form.location_lat && form.location_lng && (
-                <Marker position={[form.location_lat, form.location_lng]} />
-              )}
-            </MapContainer>
-          </div>
-          <button
-            onClick={() => navigator.geolocation.getCurrentPosition((pos) =>
-              setForm((f) => ({ ...f, location_lat: pos.coords.latitude, location_lng: pos.coords.longitude }))
-            )}
-            className="text-primary text-sm mb-3 hover:underline"
-          >
-            Use my current location
-          </button>
-
-          <div className="grid grid-cols-4 gap-2 mb-4">
-            {[[0.5,'500m'],[1.0,'1km'],[2.0,'2km'],[5.0,'5km']].map(([val, label]) => (
-              <button
-                key={val}
-                onClick={() => setForm((f) => ({ ...f, alert_radius_km: val as number }))}
-                className={`py-2 rounded-lg text-xs font-semibold border transition ${form.alert_radius_km === val ? 'bg-primary text-white border-primary' : 'bg-white text-textBody border-border hover:border-primary'}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {createMut.isError && <p className="text-primary text-sm mb-2">Failed. Please check your details.</p>}
-          {createMut.isSuccess && <p className="text-success text-sm mb-2">Location saved!</p>}
-          <button
-            onClick={() => createMut.mutate()}
-            disabled={!form.whatsapp_number || !form.label || !form.location_lat || createMut.isPending}
-            className="w-full bg-primary text-white py-3 rounded-lg font-semibold text-sm disabled:opacity-50"
-          >
-            {createMut.isPending ? 'Saving...' : 'Save Location'}
-          </button>
-        </div>
-
-        {/* Manage saved locations */}
-        <div className="bg-white rounded-xl border border-border p-5">
-          <h3 className="font-bold mb-3">Manage saved locations</h3>
-          <div className="flex gap-2 mb-4">
-            <input
-              value={managePhone}
-              onChange={(e) => setManagePhone(e.target.value)}
-              placeholder="+2348012345678"
-              className="flex-1 border border-border rounded-lg p-2 text-sm"
-            />
-            <button
-              onClick={handleLookup}
-              className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold"
-            >
-              Look up
-            </button>
-          </div>
-
-          {loadingSubs && <p className="text-textMuted text-sm">Loading...</p>}
-          {manageHash && !loadingSubs && subs.length === 0 && (
-            <p className="text-textMuted text-sm">No saved locations found for this number.</p>
-          )}
-
-          {/* Unified score + controls rows */}
-          <div className="space-y-2">
-            {subs.map((sub) => (
-              <SubRow
-                key={sub.id}
-                sub={sub}
-                onOpenHistory={(lat, lng, radiusKm, label) => setHistoryPanel({ lat, lng, radiusKm, label })}
-                onPause={(id, next) => pauseMut.mutate({ id, is_active: next })}
-                onDelete={(id) => deleteMut.mutate(id)}
-                isPausing={pauseMut.isPending}
-                isDeleting={deleteMut.isPending}
-              />
-            ))}
-          </div>
-        </div>
-
         {/* Commute Shield */}
         <div className="bg-white rounded-xl border border-border p-5">
           <h3 className="font-bold mb-1">Commute Shield</h3>
@@ -391,17 +123,6 @@ export default function WatchPage() {
         </p>
       </div>
 
-      {/* Zone History Drawer */}
-      {historyPanel && (
-        <ZoneHistoryPanel
-          lat={historyPanel.lat ?? undefined}
-          lng={historyPanel.lng ?? undefined}
-          radiusKm={historyPanel.radiusKm}
-          locationLabel={historyPanel.label}
-          isOpen={true}
-          onClose={() => setHistoryPanel(null)}
-        />
-      )}
     </div>
   )
 }

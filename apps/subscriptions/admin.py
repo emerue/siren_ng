@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import LocationSubscription, SubscriptionAlert, SafetyScoreLog
+from .models import LocationSubscription, LGASubscription, LGASubscriptionAlert, SubscriptionAlert, SafetyScoreLog
 
 
 @admin.register(LocationSubscription)
@@ -9,6 +9,20 @@ class LocationSubscriptionAdmin(admin.ModelAdmin):
     list_filter   = ['subscription_type', 'location_type', 'is_active']
     search_fields = ['label', 'whatsapp_number']
     readonly_fields = ['id', 'phone_hash', 'created_at', 'updated_at']
+
+
+@admin.register(LGASubscription)
+class LGASubscriptionAdmin(admin.ModelAdmin):
+    list_display = ['user', 'lga', 'whatsapp_number', 'is_active', 'created_at']
+    list_filter = ['lga', 'is_active']
+    search_fields = ['user__username', 'user__email', 'lga', 'whatsapp_number']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(LGASubscriptionAlert)
+class LGASubscriptionAlertAdmin(admin.ModelAdmin):
+    list_display = ['subscription', 'incident', 'sent_at']
+    readonly_fields = ['sent_at']
 
 
 @admin.register(SubscriptionAlert)

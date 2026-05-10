@@ -22,6 +22,7 @@ import DashboardDonations from './pages/DashboardDonations'
 import DashboardIncidentDetail from './pages/DashboardIncidentDetail'
 import MyImpactPage from './pages/MyImpactPage'
 import ConnectPage from './pages/ConnectPage'
+import GuardianModePage from './pages/GuardianModePage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/organisations" element={<OrgsPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/my-impact" element={<MyImpactPage />} />
+          <Route path="/guardian" element={<GuardianModePage />} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardHome /></ProtectedRoute>} />
           <Route path="/dashboard/incidents/:id" element={<ProtectedRoute><DashboardIncidentDetail /></ProtectedRoute>} />
           <Route path="/dashboard/analytics" element={<ProtectedRoute><DashboardAnalytics /></ProtectedRoute>} />

@@ -7,66 +7,156 @@ logger = logging.getLogger(__name__)
 
 @shared_task
 def notify_location_subscribers(incident_id):
-    """Alert all active POINT subscribers within their chosen radius of a verified incident."""
+    """
+    Alert all active LGA subscribers for a verified incident.
+    Matches incident.zone_name against LGASubscription.lga using normalize_lga_name.
+    """
     from apps.incidents.models import Incident
-    from apps.subscriptions.models import LocationSubscription, SubscriptionAlert
+    from apps.subscriptions.models import LGASubscription, LGASubscriptionAlert
     from apps.whatsapp.tasks import send_whatsapp_text
-    from apps.whatsapp import templates as tmpl
-    from utils.distance import haversine_query
     from django.db import IntegrityError
 
     try:
         incident = Incident.objects.get(id=incident_id)
     except Incident.DoesNotExist:
+        logger.error("notify_location_subscribers: incident %s not found", incident_id)
         return
 
-    if not incident.location_lat or not incident.location_lng:
-        logger.info("notify_location_subscribers: incident %s has no GPS — skipping", incident_id)
+    if not incident.zone_name:
+        logger.info(
+            "notify_location_subscribers: no zone_name for incident %s — skipping", incident_id
+        )
         return
 
-    # Broad sweep — 10km. Per-subscriber radius filtered below.
-    rows = haversine_query(
-        table='subscriptions_locationsubscription',
-        lat_field='location_lat',
-        lng_field='location_lng',
-        incident_lat=incident.location_lat,
-        incident_lng=incident.location_lng,
-        radius_km=10.0,
-        extra_filters="AND is_active = TRUE AND subscription_type = 'POINT'",
-        limit=500,
+    lga = normalize_lga_name(incident.zone_name)
+    if not lga:
+        logger.warning(
+            "notify_location_subscribers: could not normalize zone '%s' for incident %s",
+            incident.zone_name, incident_id,
+        )
+        return
+
+    subscribers = LGASubscription.objects.filter(
+        lga=lga, is_active=True
+    ).select_related('user')
+
+    if not subscribers.exists():
+        logger.info(
+            "notify_location_subscribers: no subscribers for LGA '%s' (incident %s)",
+            lga, incident_id,
+        )
+        return
+
+    incident_type_label = incident.incident_type or "Emergency"
+    severity = incident.severity or "UNKNOWN"
+    tracking_url = f"https://sirenng-production.up.railway.app/track/{incident.id}"
+
+    message = (
+        f"\U0001f6a8 GUARDIAN MODE ALERT\n\n"
+        f"{incident_type_label} in {incident.zone_name}\n"
+        f"Severity: {severity}\n\n"
+        f"{incident.description[:150]}\n\n"
+        f"Track: {tracking_url}\n\n"
+        f"You're receiving this because you subscribed to {lga} alerts.\n"
+        f"Reply STOP to unsubscribe."
     )
 
     sent = 0
-    for row in rows:
+    for sub in subscribers:
+        # Dedup: one alert per subscription+incident
         try:
-            sub = LocationSubscription.objects.get(id=row['id'])
-        except LocationSubscription.DoesNotExist:
-            continue
-
-        # Individual radius filter
-        if row['distance_km'] > sub.alert_radius_km:
-            continue
-
-        # Incident type filter
-        if sub.incident_types and incident.incident_type not in sub.incident_types:
-            continue
-
-        # Dedup
-        try:
-            SubscriptionAlert.objects.create(
-                subscription=sub,
-                incident=incident,
-                distance_km=row['distance_km'],
-                alert_type='POINT',
-            )
+            LGASubscriptionAlert.objects.create(subscription=sub, incident=incident)
         except IntegrityError:
-            continue  # Already alerted
+            continue
 
-        message = tmpl.subscription_alert(sub, incident, row['distance_km'])
-        send_whatsapp_text.delay(sub.whatsapp_number, message)
-        sent += 1
+        phone = sub.whatsapp_number
+        if not phone:
+            continue
 
-    logger.info("notify_location_subscribers: sent %d alerts for incident %s", sent, incident_id)
+        # Ensure number has whatsapp: prefix for Twilio
+        if not phone.startswith('whatsapp:'):
+            phone = f'whatsapp:{phone}'
+
+        try:
+            send_whatsapp_text.delay(phone, message)
+            sent += 1
+        except Exception as e:
+            logger.error(
+                "notify_location_subscribers: failed to send to %s: %s", phone, e
+            )
+
+    logger.info(
+        "notify_location_subscribers: sent %d alerts for LGA '%s' (incident %s)",
+        sent, lga, incident_id,
+    )
+
+
+def normalize_lga_name(zone_name):
+    """
+    Normalize a zone name to a canonical Lagos LGA name.
+    Returns the canonical name, or the title-cased zone_name if unrecognized.
+    """
+    if not zone_name:
+        return None
+
+    zone_lower = zone_name.lower().strip()
+
+    LGA_MAP = {
+        'surulere': 'Surulere',
+        'yaba': 'Lagos Mainland',
+        'apapa': 'Apapa',
+        'mushin': 'Mushin',
+        'ikeja': 'Ikeja',
+        'agege': 'Agege',
+        'alimosho': 'Alimosho',
+        'oshodi': 'Oshodi-Isolo',
+        'isolo': 'Oshodi-Isolo',
+        'oshodi-isolo': 'Oshodi-Isolo',
+        'somolu': 'Somolu',
+        'shomolu': 'Shomolu',
+        'kosofe': 'Kosofe',
+        'gbagada': 'Kosofe',
+        'ajeromi': 'Ajeromi-Ifelodun',
+        'ajeromi-ifelodun': 'Ajeromi-Ifelodun',
+        'amuwo': 'Amuwo-Odofin',
+        'amuwo-odofin': 'Amuwo-Odofin',
+        'festac': 'Amuwo-Odofin',
+        'ikorodu': 'Ikorodu',
+        'epe': 'Epe',
+        'badagry': 'Badagry',
+        'ojo': 'Ojo',
+        'ifako': 'Ifako-Ijaiye',
+        'ijaiye': 'Ifako-Ijaiye',
+        'ifako-ijaiye': 'Ifako-Ijaiye',
+        # Eti-Osa aliases
+        'victoria island': 'Eti-Osa',
+        'v.i.': 'Eti-Osa',
+        'vi': 'Eti-Osa',
+        'lekki': 'Eti-Osa',
+        'ikoyi': 'Eti-Osa',
+        'ajah': 'Eti-Osa',
+        'eti-osa': 'Eti-Osa',
+        'eti osa': 'Eti-Osa',
+        'ibeju-lekki': 'Ibeju-Lekki',
+        'ibeju lekki': 'Ibeju-Lekki',
+        # Lagos Island
+        'lagos island': 'Lagos Island',
+        'cms': 'Lagos Island',
+        'marina': 'Lagos Island',
+        'lagos mainland': 'Lagos Mainland',
+    }
+
+    # Exact match
+    if zone_lower in LGA_MAP:
+        return LGA_MAP[zone_lower]
+
+    # Partial match (e.g. "Surulere area" → "Surulere")
+    for alias, canonical in LGA_MAP.items():
+        if alias in zone_lower:
+            return canonical
+
+    # Return title-cased original so unrecognized zones still get logged
+    return zone_name.title()
 
 
 @shared_task

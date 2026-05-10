@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import LocationSubscription, SubscriptionAlert, SafetyScoreLog
+from .models import LocationSubscription, SubscriptionAlert, SafetyScoreLog, LGASubscription
 
 
 class LocationSubscriptionSerializer(serializers.ModelSerializer):
@@ -21,6 +21,17 @@ class SubscriptionAlertSerializer(serializers.ModelSerializer):
         model = SubscriptionAlert
         fields = ['id', 'subscription', 'incident', 'distance_km', 'alert_type', 'sent_at', 'delivered']
         read_only_fields = ['id', 'sent_at']
+
+
+class LGASubscriptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LGASubscription
+        fields = ['id', 'lga', 'whatsapp_number', 'is_active', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+    def create(self, validated_data):
+        validated_data['user'] = self.context['request'].user
+        return super().create(validated_data)
 
 
 class SafetyScoreLogSerializer(serializers.ModelSerializer):

@@ -2,12 +2,59 @@ import hashlib
 from datetime import timedelta
 
 from django.utils import timezone
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework import status, viewsets
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from .models import LocationSubscription, SubscriptionAlert, SafetyScoreLog
-from .serializers import LocationSubscriptionSerializer
+from .models import LocationSubscription, LGASubscription, SubscriptionAlert, SafetyScoreLog
+from .serializers import LocationSubscriptionSerializer, LGASubscriptionSerializer
+
+
+AVAILABLE_LGAS = sorted([
+    'Agege', 'Ajeromi-Ifelodun', 'Alimosho', 'Amuwo-Odofin', 'Apapa',
+    'Badagry', 'Epe', 'Eti-Osa', 'Ibeju-Lekki', 'Ifako-Ijaiye',
+    'Ikorodu', 'Ikeja', 'Kosofe', 'Lagos Island', 'Lagos Mainland',
+    'Mushin', 'Ojo', 'Oshodi-Isolo', 'Shomolu', 'Somolu', 'Surulere',
+])
+
+
+class LGASubscriptionViewSet(viewsets.ModelViewSet):
+    """API endpoints for LGA-based Guardian Mode subscriptions."""
+    serializer_class = LGASubscriptionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return LGASubscription.objects.filter(user=self.request.user).order_by('-created_at')
+
+    def create(self, request, *args, **kwargs):
+        lga = request.data.get('lga', '').strip()
+        if not lga:
+            return Response({'error': 'lga is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = LGASubscription.objects.filter(user=request.user, lga=lga).first()
+        if existing:
+            if existing.is_active:
+                return Response(
+                    {'detail': f'Already subscribed to {lga}'},
+                    status=status.HTTP_200_OK,
+                )
+            existing.is_active = True
+            existing.save(update_fields=['is_active', 'updated_at'])
+            return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
+
+        return super().create(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save(update_fields=['is_active', 'updated_at'])
+        return Response({'detail': f'Unsubscribed from {instance.lga}'}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def available_lgas(self, request):
+        """GET /api/subscriptions/lga/available_lgas/ — list all Lagos LGAs."""
+        return Response({'lgas': AVAILABLE_LGAS})
 
 
 @api_view(['GET', 'POST'])

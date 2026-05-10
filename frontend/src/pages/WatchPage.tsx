@@ -255,6 +255,20 @@ export default function WatchPage() {
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
+        {/* Guardian Mode callout */}
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+          <span className="text-red-500 text-lg mt-0.5">&#9873;</span>
+          <div>
+            <p className="font-semibold text-red-900 text-sm">New: Guardian Mode (LGA-based)</p>
+            <p className="text-red-700 text-xs mt-0.5">
+              Subscribe to entire Lagos LGAs — no map pin needed. Works even when incident coordinates are missing.
+            </p>
+            <Link to="/guardian" className="inline-block mt-2 text-xs font-semibold text-red-700 underline">
+              Set up Guardian Mode →
+            </Link>
+          </div>
+        </div>
+
         {/* Save a location form */}
         <div className="bg-white rounded-xl border border-border p-5">
           <h3 className="font-bold mb-4">Save a location to watch</h3>

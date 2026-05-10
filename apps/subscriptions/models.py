@@ -1,4 +1,5 @@
 import uuid
+from django.conf import settings
 from django.db import models
 
 LOCATION_TYPES = [
@@ -79,6 +80,55 @@ class SubscriptionAlert(models.Model):
     delivered    = models.BooleanField(default=True)
 
     class Meta:
+        unique_together = ('subscription', 'incident')
+
+
+class LGASubscription(models.Model):
+    """
+    LGA-based subscription for Guardian Mode (web).
+    Users subscribe to emergency alerts for specific Lagos LGAs.
+    Alerts are sent via WhatsApp when a verified incident matches the LGA.
+    """
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='lga_subscriptions',
+    )
+    lga = models.CharField(max_length=50, help_text="Lagos Local Government Area name")
+    whatsapp_number = models.CharField(
+        max_length=20, blank=True,
+        help_text="WhatsApp number for alerts (e.g. +2348012345678)"
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'subscriptions_lgasubscription'
+        verbose_name = 'LGA Subscription'
+        verbose_name_plural = 'LGA Subscriptions'
+        unique_together = [['user', 'lga']]
+        indexes = [
+            models.Index(fields=['lga', 'is_active']),
+            models.Index(fields=['user', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.user} → {self.lga}"
+
+
+class LGASubscriptionAlert(models.Model):
+    """Dedup tracker: one record per (subscription, incident) pair."""
+    subscription = models.ForeignKey(
+        LGASubscription, on_delete=models.CASCADE, related_name='alerts'
+    )
+    incident = models.ForeignKey(
+        'incidents.Incident', on_delete=models.CASCADE
+    )
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'subscriptions_lgasubscriptionalert'
         unique_together = ('subscription', 'incident')
 
 

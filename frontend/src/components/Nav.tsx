@@ -3,11 +3,12 @@ import { useState } from 'react'
 import { useAuthStore } from '../store/authStore'
 
 const NAV_LINKS = [
-  { to: '/',      label: 'Home' },
-  { to: '/map',   label: 'Map' },
-  { to: '/feed',  label: 'Feed' },
-  { to: '/watch', label: 'Watch' },
-  { to: '/join',  label: 'Join' },
+  { to: '/',         label: 'Home' },
+  { to: '/map',      label: 'Map' },
+  { to: '/feed',     label: 'Feed' },
+  { to: '/guardian', label: 'Guardian' },
+  { to: '/watch',    label: 'Watch' },
+  { to: '/join',     label: 'Join' },
 ]
 
 export default function Nav() {

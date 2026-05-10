@@ -25,7 +25,10 @@
       "Bash(mkdir:*)",
       "Bash(.venv/Scripts/pip install:*)",
       "Bash(ls:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(curl:*)",
+      "Bash(\"C:/Users/JudeEmerue/Downloads/vscode/siren_ng/start-worker.sh\":*)",
+      "mcp__ide__executeCode"
     ]
   }
 }

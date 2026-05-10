@@ -1,9 +1,96 @@
 import uuid
 import logging
+import requests
+from io import BytesIO
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Twilio media helpers                                                         #
+# --------------------------------------------------------------------------- #
+
+_TWILIO_CONTENT_TYPE_MAP = {
+    'image/jpeg':     ('image', 'jpg'),
+    'image/png':      ('image', 'png'),
+    'image/webp':     ('image', 'webp'),
+    'video/mp4':      ('video', 'mp4'),
+    'video/quicktime':('video', 'mov'),
+    'video/3gpp':     ('video', '3gp'),
+    # audio/* intentionally excluded — skip voice notes
+}
+
+
+def download_twilio_media(media_url):
+    """
+    Download a Twilio temporary media URL (requires Basic Auth).
+    Returns (file_bytes: BytesIO, content_type: str, file_size: int) or None.
+    """
+    try:
+        response = requests.get(
+            media_url,
+            auth=(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN),
+            timeout=30,
+        )
+        response.raise_for_status()
+        content_type = response.headers.get('Content-Type', '').split(';')[0].strip()
+        return BytesIO(response.content), content_type, len(response.content)
+    except Exception as e:
+        logger.error("download_twilio_media failed for %s: %s", media_url, e)
+        return None
+
+
+def upload_twilio_media_to_supabase(media_url, incident_id):
+    """
+    Download from Twilio, upload to Supabase Storage.
+    Returns dict {public_url, storage_path, media_type, file_size} or None.
+    """
+    result = download_twilio_media(media_url)
+    if result is None:
+        return None
+
+    file_bytes, content_type, file_size = result
+
+    type_info = _TWILIO_CONTENT_TYPE_MAP.get(content_type)
+    if type_info is None:
+        logger.warning("upload_twilio_media_to_supabase: unsupported type %s", content_type)
+        return None
+
+    media_type, extension = type_info
+
+    max_bytes = (
+        settings.MAX_IMAGE_SIZE_MB * 1024 * 1024 if media_type == 'image'
+        else settings.MAX_VIDEO_SIZE_MB * 1024 * 1024
+    )
+    if file_size > max_bytes:
+        logger.warning(
+            "upload_twilio_media_to_supabase: file too large (%d bytes)", file_size
+        )
+        return None
+
+    storage_path = f"incidents/{incident_id}/{uuid.uuid4()}.{extension}"
+
+    try:
+        supabase = _get_supabase()
+        bucket = settings.SUPABASE_STORAGE_BUCKET
+        file_bytes.seek(0)
+        supabase.storage.from_(bucket).upload(
+            storage_path,
+            file_bytes.read(),
+            {'content-type': content_type},
+        )
+        public_url = supabase.storage.from_(bucket).get_public_url(storage_path)
+        return {
+            'public_url': public_url,
+            'storage_path': storage_path,
+            'media_type': media_type,
+            'file_size': file_size,
+        }
+    except Exception as e:
+        logger.error("upload_twilio_media_to_supabase Supabase upload failed: %s", e)
+        return None
 
 
 def _get_supabase():

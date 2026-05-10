@@ -16,6 +16,48 @@ logger = logging.getLogger(__name__)
 
 ONBOARDING_TTL = 600  # 10 minutes
 
+# -- Emergency intent detection ------------------------------------------------
+
+EMERGENCY_KEYWORDS = {
+    # English
+    'fire', 'flood', 'accident', 'collapse', 'explosion', 'drowning',
+    'hazard', 'help', 'emergency', 'sos',
+    # Pidgin
+    'wahala',
+    # Common Lagos terms
+    'wire', 'tanker', 'nepa', 'ekedc',
+    # Yoruba
+    'ina',   # fire
+    # Hausa
+    'wuta', 'hatsari',  # fire, accident
+}
+
+SINGLE_WORD_TYPE_MAP = {
+    'fire': 'FIRE', 'ina': 'FIRE', 'wuta': 'FIRE',
+    'flood': 'FLOOD',
+    'accident': 'RTA', 'hatsari': 'RTA',
+    'collapse': 'COLLAPSE',
+    'explosion': 'EXPLOSION',
+    'drowning': 'DROWNING',
+    'wire': 'HAZARD', 'nepa': 'HAZARD', 'ekedc': 'HAZARD',
+    'hazard': 'HAZARD',
+}
+
+
+def detect_emergency_intent(body):
+    """
+    Quick check: does the message contain any emergency keyword?
+    Returns (has_intent: bool, suggested_type: str or None)
+    """
+    words = set(body.lower().split())
+    for word in words:
+        # Strip punctuation from word edges
+        clean = word.strip('!?.,;:')
+        if clean in EMERGENCY_KEYWORDS:
+            suggested_type = SINGLE_WORD_TYPE_MAP.get(clean, '')
+            return True, suggested_type
+    return False, None
+
 
 # -- Entry point ---------------------------------------------------------------
 
@@ -59,6 +101,19 @@ def route_inbound(from_number, body, media_urls, location):
     if is_onboarding(from_number):
         return handle_onboarding_step(from_number, body)
 
+    # v7: Fast-path for non-emergency short messages
+    has_intent, _ = detect_emergency_intent(body)
+    if not has_intent and len(body.split()) <= 3:
+        # Short message with zero emergency indicators -- send welcome
+        send_whatsapp_text.delay(
+            from_number,
+            "Welcome to Siren NG -- Lagos emergency coordination.\n\n"
+            "To report an emergency, describe what you see.\n"
+            "Example: \"Fire at Balogun market, smoke everywhere\"\n\n"
+            "Or send your location with a description."
+        )
+        return
+
     return create_incident_from_message(from_number, body, media_urls, location)
 
 
@@ -81,6 +136,9 @@ def create_incident_from_message(from_number, body, media_urls, location):
 
     incident = Incident.objects.create(**kwargs)
     verify_incident_ai.delay(str(incident.id))
+    if media_urls:
+        from apps.whatsapp.tasks import process_whatsapp_media
+        process_whatsapp_media.delay(str(incident.id), media_urls)
     send_whatsapp_text.delay(from_number, tmpl.received_ack())
     return incident
 
@@ -669,6 +727,6 @@ def handle_need_ride(from_number):
 
     send_whatsapp_text.delay(
         from_number,
-        f"Noted — looking for transport near you on the incident board.\n\n"
+        f"Noted -- looking for transport near you on the incident board.\n\n"
         f"See who is offering: {tmpl.SITE_URL}/track/{incident.id}"
     )

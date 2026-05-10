@@ -14,6 +14,54 @@ before starting the next. Do not skip ahead.
 If you are applying v6 updates to an existing v5 MVP, skip to SECTION 20.
 
 ================================================================================
+WHAT CHANGED IN v7.2 — WHATSAPP MEDIA FIX (May 2026)
+================================================================================
+
+Section 17.2 — WhatsApp media ingestion clarified: Twilio media URLs are
+               temporary and require immediate download. Audio (voice notes)
+               is skipped. 3GP video is now supported.
+Section 17.4 — Field names corrected to match actual IncidentMedia model:
+               file_url → public_url, file_size_kb → file_size (bytes),
+               uploaded_at → upload_timestamp.
+Section 17.5 — GET /api/incidents/{id}/ media array updated to use public_url.
+Section 17.6 — Two new functions added to services/media_service.py:
+               download_twilio_media() and upload_twilio_media_to_supabase().
+Section 11.15— NEW: process_whatsapp_media Celery task added to
+               apps/whatsapp/tasks.py. Fires immediately after incident
+               creation when WhatsApp message includes media (NumMedia > 0).
+               Task: apps.whatsapp.tasks.process_whatsapp_media.
+               Triggered by: create_incident_from_message in handlers.py.
+
+handlers.py  — create_incident_from_message now calls
+               process_whatsapp_media.delay(incident_id, media_urls) after
+               verify_incident_ai.delay(). Media download does NOT block
+               incident creation or AI verification.
+
+Everything in Sections 1–22 from v7.1 is unchanged unless explicitly noted.
+
+================================================================================
+WHAT CHANGED IN v7.1 — TIER 1 GAP FIXES (May 2026)
+================================================================================
+
+Section 10.2 — NEW: Multilingual Input Handling. AI prompt now handles
+               Nigerian Pidgin, Yoruba, Hausa, Igbo, and mixed-code messages.
+               Reports in Pidgin must never be rejected for language alone.
+Section 10.3 — NEW: Short Message Handling. AI must never reject a report
+               solely because it is brief. Single emergency keywords classify
+               at MEDIUM severity. Only truly non-emergency messages rejected.
+Section 11.14— NEW: Reporter Closure Notification. When an incident is marked
+               RESOLVED, the original reporter receives a WhatsApp summary
+               (type, zone, resolution time, responder count, donations).
+               Task: apps.whatsapp.tasks.notify_reporter_resolved.
+               Triggered by: incident_resolve view + mark_resolved admin action.
+
+handlers.py  — detect_emergency_intent() fast-path added. Non-emergency short
+               messages (<=3 words, zero keywords) receive welcome message
+               instead of creating an incident.
+
+Everything in Sections 1–22 from v7 is unchanged unless explicitly noted.
+
+================================================================================
 WHAT CHANGED IN v7
 ================================================================================
 
@@ -978,6 +1026,97 @@ Key points:
   - notify_commute_shield triggered for HAZARD/RTA/FLOOD incidents.
   - zone_name extracted by Claude from address_text.
 
+--------------------------------------------------------------------------------
+10.2 MULTILINGUAL INPUT HANDLING
+--------------------------------------------------------------------------------
+
+The AI verification prompt MUST handle input in:
+  - Standard English
+  - Nigerian Pidgin English
+  - Yoruba
+  - Hausa
+  - Igbo
+  - Mixed-code (switching between languages in one message)
+
+Classification rules for non-English input:
+  - "E don catch fire" / "Fire dey burn" = FIRE
+  - "Person don fall" / "Accident happen" = RTA
+  - "Building don fall" / "House don collapse" = COLLAPSE
+  - "Water don full" / "Flood everywhere" = FLOOD
+  - "Wire don cut" / "NEPA wire fall" / "Pole don fall" = HAZARD
+  - "Person dey drown" / "Body dey inside water" = DROWNING
+  - "Tanker don burst" / "Gas don leak" = EXPLOSION
+
+The AI must interpret colloquial language generously. If ANY emergency
+keyword or intent is present in ANY language, classify it. Never reject
+a report solely because it is not in formal English.
+
+Pidgin markers to recognise:
+  "don" = has/have (past tense marker)
+  "dey" = is/are (continuous tense marker)
+  "for" = at/in (location preposition)
+  "abeg" = please (urgency marker)
+  "o!" = emphasis/exclamation
+  "pikin" = child
+  "oga" = sir/boss
+  "wahala" = trouble/problem
+
+Yoruba: "Ina" = fire, "Omi" = water (flood/drowning), "Ile wo" = building collapsed
+Hausa: "Wuta"/"Ina" = fire, "Hatsari" = accident, "Ruwa" = water/flood
+
+The AI should treat Pidgin with the same classification confidence as
+formal English. A message in Pidgin is not lower quality — it is the
+natural crisis language of most Lagos residents.
+
+Implementation: LANGUAGE_INSTRUCTIONS prepended to the AI prompt string
+in apps/incidents/tasks.py → verify_incident_ai.
+
+--------------------------------------------------------------------------------
+10.3 SHORT MESSAGE HANDLING — NEVER REJECT FOR BREVITY
+--------------------------------------------------------------------------------
+
+The AI verification MUST NOT reject a report solely because it is short.
+
+Rules for short messages (under 20 words):
+
+1. If the message contains ANY of the 7 incident type keywords
+   (fire, flood, collapse, accident, explosion, drowning, hazard, wire,
+   tanker, building fall, water, drown, wahala, ina, wuta, hatsari)
+   — CLASSIFY IT. Do not ask for more information. Do not reject.
+
+2. If the message contains a location reference (any Lagos area name,
+   street, landmark, bridge, market) — extract it.
+
+3. If the message is a single emergency word ("Fire", "Help", "Flood",
+   "Accident") — classify it with MEDIUM severity. Do not reject.
+
+4. Only reject if the message contains NO emergency indicators whatsoever.
+   Examples of rejectable messages: "Hello", "How are you",
+   "What is this number", "I want to buy airtime".
+
+5. When in doubt, VERIFY rather than REJECT. A false positive wastes
+   90 seconds of AI time. A false negative wastes a human life.
+
+Short message classification examples:
+  "Fire in Yaba"           → FIRE, zone: Yaba, severity: MEDIUM
+  "Accident Third Mainland"→ RTA, zone: Third Mainland Bridge, severity: HIGH
+  "Wire down Surulere"     → HAZARD, zone: Surulere, severity: HIGH
+  "Flood"                  → FLOOD, severity: MEDIUM, zone: unknown
+  "Fire"                   → FIRE, severity: MEDIUM, zone: unknown
+
+Pre-AI fast-path (handlers.py):
+  detect_emergency_intent(body) scans message for EMERGENCY_KEYWORDS set.
+  Non-emergency messages <=3 words with zero keywords receive a welcome
+  reply and do NOT create an incident. All others proceed to AI verification.
+
+  EMERGENCY_KEYWORDS includes: fire, flood, accident, collapse, explosion,
+  drowning, hazard, help, emergency, sos, wahala, wire, tanker, nepa,
+  ekedc, ina, wuta, hatsari.
+
+Implementation: BREVITY_INSTRUCTIONS prepended to the AI prompt string
+alongside LANGUAGE_INSTRUCTIONS in apps/incidents/tasks.py.
+detect_emergency_intent() in apps/whatsapp/handlers.py.
+
 ================================================================================
 SECTION 11 — WHATSAPP FLOWS
 ================================================================================
@@ -1003,6 +1142,85 @@ Key flows reference:
   11.11 Guardian closure — MY IMPACT message
   11.12 Responder notification
   11.13 Organisation notification
+  11.14 Reporter closure notification (NEW — v7.1)
+  11.15 WhatsApp media download + storage (NEW — v7.2)
+
+--------------------------------------------------------------------------------
+11.14 REPORTER CLOSURE NOTIFICATION
+--------------------------------------------------------------------------------
+
+When an incident transitions to RESOLVED status, the original reporter
+receives a WhatsApp closure message.
+
+Trigger:   Incident.status changes to RESOLVED
+Condition: reporter_phone is not empty
+Channel:   WhatsApp via Twilio
+Task:      apps.whatsapp.tasks.notify_reporter_resolved
+Called by: apps/incidents/views.py → incident_resolve (PATCH /api/incidents/{id}/resolve/)
+           apps/incidents/admin.py → mark_resolved admin action
+
+Message format:
+  ✅ Update: Your report has been resolved.
+
+  {incident_type} — {zone_name}
+  Resolved in {resolution_time}.
+  {N} responder(s) assisted.          ← omitted if 0
+  ₦{amount} raised for relief.        ← omitted if 0 donations
+
+  Thank you for reporting. You helped protect your community.
+
+  Track details: https://sirenng-production.up.railway.app/track/{id}
+
+Resolution time calculation:
+  delta = resolved_at - created_at
+  Format: "X hours, Y minutes" or "Y minutes" if under 1 hour.
+  Falls back to "time not recorded" if resolved_at is null.
+
+Responder count:
+  incident.response_logs.filter(to_status__in=['RESPONDING','AGENCY_NOTIFIED'])
+  .values('actor').distinct().count()
+
+Donation summary:
+  incident.total_donations_kobo / 100 → naira, shown only if > 0.
+
+This message fires ONCE per incident per reporter (task called at
+transition point, not on every save). No re-send on subsequent changes.
+
+--------------------------------------------------------------------------------
+11.15 WHATSAPP MEDIA DOWNLOAD + STORAGE
+--------------------------------------------------------------------------------
+
+When a WhatsApp user sends a photo or video with their emergency report,
+Twilio includes MediaUrl0…MediaUrlN in the webhook payload. These are
+temporary URLs that expire. They must be downloaded immediately.
+
+Trigger:   Incident created from WhatsApp with NumMedia > 0
+Condition: media_urls list is non-empty after incident creation
+Channel:   Internal Celery task (no outbound message)
+Task:      apps.whatsapp.tasks.process_whatsapp_media
+Called by: apps/whatsapp/handlers.py → create_incident_from_message
+
+Flow:
+  1. create_incident_from_message creates the Incident as normal.
+  2. verify_incident_ai.delay() fires (unchanged).
+  3. If media_urls is non-empty: process_whatsapp_media.delay(incident_id, media_urls).
+  4. Incident creation is NOT blocked by media success/failure.
+
+process_whatsapp_media task (per URL, up to 5):
+  1. download_twilio_media(url) — Twilio Basic Auth required.
+     auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+  2. Determine (media_type, ext) from Content-Type header.
+     Supported: image/jpeg→jpg, image/png→png, image/webp→webp,
+                video/mp4→mp4, video/quicktime→mov, video/3gpp→3gp
+     Skipped:   audio/* (voice notes — not stored)
+  3. Check file_size ≤ MAX_IMAGE_SIZE_MB / MAX_VIDEO_SIZE_MB.
+  4. Upload to Supabase Storage at incidents/{id}/{uuid}.{ext}.
+  5. Create IncidentMedia(incident, media_type, public_url, storage_path, file_size).
+  6. Log success or failure per file. Never raise — partial success is fine.
+
+Do NOT write to the deprecated media_urls JSONField on new incidents.
+media_urls is populated by the webhook view for backwards compat only.
+The tracking page reads from the IncidentMedia model (media array in serializer).
 
 ================================================================================
 SECTION 12 — SUBSCRIPTION TASKS (apps/subscriptions/tasks.py)
@@ -1296,8 +1514,8 @@ from .models import Incident, IncidentMedia, ResponseLog, VouchRecord
 
 class IncidentMediaInline(admin.TabularInline):
     model = IncidentMedia
-    readonly_fields = ['media_type', 'file_url', 'storage_path',
-                       'file_size_kb', 'uploaded_at']
+    readonly_fields = ['media_type', 'public_url', 'storage_path',
+                       'file_size', 'upload_timestamp']
     extra = 0
     can_delete = True
 
@@ -1386,11 +1604,16 @@ drive organic awareness of the platform.
 
 - Users can attach images and/or videos when reporting via web form
 - Users can add media to an existing incident via the Track page
-- WhatsApp media (images sent with reports) is ingested via Twilio and
-  stored in the same system
+- WhatsApp media (images/videos sent with reports) is ingested via Twilio:
+  Twilio posts MediaUrl0…MediaUrlN in the webhook payload (temporary URLs).
+  The process_whatsapp_media Celery task downloads each URL immediately
+  using Twilio Basic Auth (Account SID + Auth Token), uploads to Supabase
+  Storage, and creates an IncidentMedia record. Audio (voice notes) is
+  skipped. The incident is created regardless of whether media download
+  succeeds.
 - Up to 5 media files per incident (enforced server-side)
 - Supported image formats: JPG, PNG, WebP
-- Supported video formats: MP4, MOV
+- Supported video formats: MP4, MOV, 3GP
 - File size limits: 5MB per image, 50MB per video
 - Media linked to a specific incident record in the database
 - Media viewable by reporter, responders, admins on incident page
@@ -1420,13 +1643,14 @@ The media_urls JSONField on Incident is deprecated. Do not write to it.
 Existing data in that field stays for backwards compat only.
 
 Fields per media record:
-  incident      ForeignKey to Incident. CASCADE on delete.
-  media_type    'image' or 'video'
-  file_url      Public Supabase Storage URL for display
-  storage_path  Full bucket path for deletion
-  thumbnail_url Optional. Future use for video thumbnails.
-  file_size_kb  File size in kilobytes
-  uploaded_at   Auto-set on creation. Orders media chronologically.
+  incident          ForeignKey to Incident. CASCADE on delete.
+  media_type        'image', 'video', or 'url'
+  public_url        Public Supabase Storage URL for display
+  storage_path      Full bucket path for deletion (blank for URL-only entries)
+  file_size         File size in bytes (null for URL-only entries)
+  caption           Optional text caption (max 500 chars)
+  uploaded_by_hash  SHA-256 of reporter phone/session (blank for WhatsApp)
+  upload_timestamp  Auto-set on creation. Orders media chronologically.
 
 --------------------------------------------------------------------------------
 17.5 API ENDPOINTS
@@ -1451,8 +1675,8 @@ DELETE /api/media/{media_id}/
 
 GET /api/incidents/{id}/
   Updated. Response now includes nested 'media' array:
-  "media": [{"id", "media_type", "file_url", "thumbnail_url",
-             "file_size_kb", "uploaded_at"}]
+  "media": [{"id", "media_type", "public_url", "file_size",
+             "caption", "upload_timestamp"}]
 
 --------------------------------------------------------------------------------
 17.6 STORAGE SERVICE (services/media_service.py)
@@ -1479,6 +1703,23 @@ validate_file(file):
   3. Check against ALLOWED_IMAGE_TYPES + ALLOWED_VIDEO_TYPES
   4. Check size against MAX_IMAGE_SIZE_MB / MAX_VIDEO_SIZE_MB
   5. Return (media_type, mime_type) or raise ValidationError
+
+download_twilio_media(media_url):
+  Used by the WhatsApp media pipeline only.
+  Twilio media URLs are temporary and require authentication.
+  1. requests.get(media_url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), timeout=30)
+  2. Parse Content-Type header (strip charset suffix)
+  3. Return (BytesIO(response.content), content_type, len(response.content))
+     or None on error.
+
+upload_twilio_media_to_supabase(media_url, incident_id):
+  Used by apps/whatsapp/tasks.process_whatsapp_media only.
+  1. download_twilio_media(media_url)
+  2. Map content_type → (media_type, extension). Skip audio/* types.
+  3. Check file_size against MAX_IMAGE_SIZE_MB / MAX_VIDEO_SIZE_MB
+  4. Generate storage_path: incidents/{incident_id}/{uuid4()}.{ext}
+  5. Upload bytes to Supabase Storage
+  6. Return {public_url, storage_path, media_type, file_size} or None on failure.
 
 Supabase client init:
   from supabase import create_client

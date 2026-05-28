@@ -35,27 +35,33 @@ class IncidentAdmin(admin.ModelAdmin):
     actions       = ["mark_verified", "mark_resolved", "mark_rejected", "run_ai_verification"]
 
     def mark_verified(self, req, qs):
-        from .tasks import _transition
+        from .tasks import _transition, _post_verification_actions
         for incident in qs:
             if incident.status != "VERIFIED":
                 _transition(incident, "VERIFIED", "admin", "Manually verified via admin panel")
                 incident.save()
+                _post_verification_actions(incident)
     mark_verified.short_description = "Mark selected as VERIFIED (with audit log)"
 
     def mark_resolved(self, req, qs):
         from .tasks import _transition
+        from apps.whatsapp.tasks import notify_reporter_resolved
+        from django.utils import timezone
         for incident in qs:
             if incident.status != "RESOLVED":
                 _transition(incident, "RESOLVED", "admin", "Resolved via admin panel")
+                incident.resolved_at = timezone.now()
                 incident.save()
+                notify_reporter_resolved.delay(str(incident.id))
     mark_resolved.short_description = "Mark selected as RESOLVED (with audit log)"
 
     def mark_rejected(self, req, qs):
-        from .tasks import _transition
+        from .tasks import _transition, _notify_rejected
         for incident in qs:
             if incident.status != "REJECTED":
                 _transition(incident, "REJECTED", "admin", "Rejected via admin panel")
                 incident.save()
+                _notify_rejected(incident, "Manually rejected via admin panel")
     mark_rejected.short_description = "Mark selected as REJECTED (with audit log)"
 
     def run_ai_verification(self, req, qs):

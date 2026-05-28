@@ -4,7 +4,7 @@ Every message the system sends comes through here.
 """
 from django.conf import settings
 
-SITE_URL = getattr(settings, 'SITE_URL', 'https://siren.ng')
+SITE_URL = getattr(settings, 'SITE_URL', 'https://sirenng-production.up.railway.app')
 
 
 def received_ack():
@@ -306,54 +306,6 @@ def registration_instructions(reg_type):
     )
 
 
-def commute_type_question():
-    return (
-        "Saved! Is this a single location or your daily commute?\n\n"
-        "Reply POINT to finish here\n"
-        "Reply COMMUTE to also set up your commute route"
-    )
-
-
-def commute_setup_home_prompt():
-    return (
-        "Commute Shield monitors the route between your home and office "
-        "during morning and evening peak hours.\n\n"
-        "Share your HOME location first."
-    )
-
-
-def commute_setup_office_prompt():
-    return "Got it. Now share your OFFICE location."
-
-
-def commute_shield_saved(sub):
-    return (
-        f"✅ Commute Shield is active — {sub.label}\n\n"
-        f"I will alert you when a verified incident (wire down, accident, flood) "
-        f"falls within {sub.commute_buffer_km}km of your route "
-        f"between 6-10am and 4-8pm.\n\n"
-        f"You will also get a route briefing every morning at 6:30am.\n\n"
-        f"Reply MY COMMUTE any time for today's status."
-    )
-
-
-def my_impact_link(phone_hash):
-    return (
-        f"See your full community impact, safety scores, and trend charts:\n\n"
-        f"{SITE_URL}/my-impact?phone_hash={phone_hash}"
-    )
-
-
-def guardian_closure(incident, sub):
-    return (
-        f"Update on {sub.label} area:\n\n"
-        f"The {incident.incident_type} has been resolved.\n"
-        f"{incident.donation_count} community members donated.\n\n"
-        f"Your watch on this location helps keep Lagos safe.\n\n"
-        f"See your impact: {SITE_URL}/my-impact"
-    )
-
-
 # -- v5 Commute Shield templates -----------------------------------------------
 
 def commute_type_question():
@@ -414,9 +366,9 @@ def guardian_closure(incident, sub):
     return (
         f"Update on {sub.label} area:\n\n"
         f"The {type_label} at {zone} has been resolved.\n"
-        f"Community contributed \u20a6{naira:,.0f}.\n\n"
+        f"Community contributed ₦{naira:,.0f}.\n\n"
         f"Your watch on this location was part of what made this possible.\n\n"
-        f"See your full impact: siren.ng/my-impact"
+        f"See your full impact: {SITE_URL}/my-impact"
     )
 
 

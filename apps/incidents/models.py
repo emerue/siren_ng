@@ -39,7 +39,7 @@ class Incident(models.Model):
     source        = models.CharField(max_length=20, choices=SOURCE_CHOICES)
     external_id   = models.CharField(max_length=200, blank=True)
     reporter_hash = models.CharField(max_length=64)
-    reporter_phone = models.CharField(max_length=20, blank=True)
+    reporter_phone = models.CharField(max_length=30, blank=True)
 
     incident_type = models.CharField(max_length=20, choices=IncidentType.choices, blank=True)
     description   = models.TextField()

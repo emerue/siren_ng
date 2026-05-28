@@ -134,14 +134,18 @@ def _post_verification_actions(incident):
         from apps.whatsapp.tasks import notify_reporter_verified, post_community_announcement
         logger.info(
             "verify_incident_ai: Incident %s verified. "
-            "Triggering notify_reporter_verified for phone %s",
+            "Triggering notify_reporter_verified for phone '%s'",
             incident.id,
-            incident.reporter_phone,
+            incident.reporter_phone or '<NO PHONE SET>',
         )
         notify_reporter_verified.delay(str(incident.id))
         post_community_announcement.delay(str(incident.id))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error(
+            "_post_verification_actions: Failed to queue reporter notification "
+            "for incident %s: %s",
+            incident.id, exc,
+        )
 
     try:
         from apps.responders.tasks import notify_nearest_responders

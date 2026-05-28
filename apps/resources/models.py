@@ -76,7 +76,7 @@ DONATION_STATUS = [
 
 
 class Donation(models.Model):
-    id              = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     incident        = models.ForeignKey('incidents.Incident', on_delete=models.CASCADE,
                         related_name='donations')
     donor_name      = models.CharField(max_length=200, blank=True)

@@ -18,13 +18,20 @@ def send_whatsapp_text(to_number, message):
     """Base Twilio send -- all outbound messages go through here."""
     try:
         from twilio.rest import Client
-        from twilio.base.exceptions import TwilioRestException
 
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        client.messages.create(
+        to_whatsapp = (
+            to_number if str(to_number).startswith('whatsapp:')
+            else f'whatsapp:{to_number}'
+        )
+        msg = client.messages.create(
             from_=settings.TWILIO_WHATSAPP_NUMBER,
-            to=f'whatsapp:{to_number}',
+            to=to_whatsapp,
             body=message,
+        )
+        logger.info(
+            "send_whatsapp_text: sent to %s with status %s",
+            to_whatsapp, getattr(msg, 'status', 'unknown')
         )
     except Exception as exc:
         logger.error("send_whatsapp_text failed to %s: %s", to_number, exc)
@@ -38,15 +45,46 @@ def notify_reporter_verified(incident_id):
     try:
         incident = Incident.objects.get(id=incident_id)
     except Incident.DoesNotExist:
+        logger.error("notify_reporter_verified: Incident %s not found", incident_id)
         return
 
     if not incident.reporter_phone:
+        logger.error(
+            "notify_reporter_verified: No reporter_phone for incident %s. "
+            "Cannot send verification result.",
+            incident_id,
+        )
         return
 
-    send_whatsapp_text.delay(
-        incident.reporter_phone,
-        tmpl.verified_notification(incident),
-    )
+    if incident.status != 'VERIFIED':
+        logger.info(
+            "notify_reporter_verified: Incident %s status is %s, not VERIFIED. "
+            "Skipping notification.",
+            incident_id,
+            incident.status,
+        )
+        return
+
+    try:
+        logger.info(
+            "notify_reporter_verified: Sending verification result to %s for incident %s",
+            incident.reporter_phone,
+            incident_id,
+        )
+        send_whatsapp_text.delay(
+            incident.reporter_phone,
+            tmpl.verified_notification(incident),
+        )
+        logger.info(
+            "notify_reporter_verified: Message queued for %s",
+            incident.reporter_phone,
+        )
+    except Exception as exc:
+        logger.error(
+            "notify_reporter_verified: Failed to send message to %s: %s",
+            incident.reporter_phone,
+            exc,
+        )
 
 
 @shared_task

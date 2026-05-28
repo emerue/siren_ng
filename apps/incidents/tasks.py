@@ -1,7 +1,10 @@
 import json
+import logging
 import re
 from celery import shared_task
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _call_ai(prompt: str) -> dict:
@@ -129,6 +132,12 @@ def _transition(incident, new_status, actor, note=''):
 def _post_verification_actions(incident):
     try:
         from apps.whatsapp.tasks import notify_reporter_verified, post_community_announcement
+        logger.info(
+            "verify_incident_ai: Incident %s verified. "
+            "Triggering notify_reporter_verified for phone %s",
+            incident.id,
+            incident.reporter_phone,
+        )
         notify_reporter_verified.delay(str(incident.id))
         post_community_announcement.delay(str(incident.id))
     except Exception:

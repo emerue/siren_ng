@@ -134,7 +134,7 @@ def create_incident_from_message(from_number, body, media_urls, location):
     kwargs = dict(
         source='WHATSAPP',
         reporter_hash=phone_hash,
-        # reporter_phone intentionally omitted — store hash only, never raw phone
+        reporter_phone=from_number,
         description=body,
         media_urls=media_urls or [],
         status='DETECTED',

@@ -48,11 +48,14 @@ def verify_incident_ai(self, incident_id: str):
     incident = Incident.objects.get(id=incident_id)
 
     # v5: Extended prompt to detect infrastructure hazards
+    # v7.3: Added zone_name extraction with Lagos LGA mapping
     prompt = f"""You are an emergency verification system for Lagos, Nigeria.
 Analyse this report and respond ONLY with valid JSON. No markdown. No explanation.
 
+--- USER INPUT ---
 Report: {incident.description}
 Location text: {incident.address_text}
+--- END USER INPUT ---
 
 IMPORTANT CONTEXT:
 - Reports come from Lagos residents via WhatsApp. They are often short and informal.
@@ -73,13 +76,44 @@ Return this exact JSON:
   "fraud_score": 0.0 to 1.0,
   "is_infrastructure": true or false,
   "suggested_skills": ["list of skill codes"],
+  "zone_name": "specific Lagos LGA name, or null if location cannot be determined",
   "reasoning": "one sentence"
 }}
 
 Only these types qualify: FIRE FLOOD COLLAPSE RTA EXPLOSION DROWNING HAZARD
 fraud_score above 0.7 means the report looks fake.
 is_infrastructure must be true if the report mentions transformer, wire, pole,
-power line, NEPA, EKEDC, fallen cable, or electrical infrastructure of any kind."""
+power line, NEPA, EKEDC, fallen cable, or electrical infrastructure of any kind.
+
+CRITICAL RULES FOR zone_name:
+- Return the SPECIFIC Lagos LGA (Local Government Area), never just "Lagos".
+- Valid LGA names: Agege, Ajeromi-Ifelodun, Alimosho, Amuwo-Odofin, Apapa,
+  Badagry, Epe, Eti-Osa, Ibeju-Lekki, Ifako-Ijaiye, Ikeja, Ikorodu, Kosofe,
+  Lagos Island, Lagos Mainland, Mushin, Ojo, Oshodi-Isolo, Shomolu, Surulere.
+- Neighbourhood to LGA mapping:
+  Isolo, Oshodi, Ejigbo, Mafoluku, Cele → "Oshodi-Isolo"
+  Yaba, Ebute Metta, Oyingbo, Adekunle, Otto, Sabo → "Lagos Mainland"
+  Victoria Island, V.I., Ikoyi, Lekki Phase 1, Oniru → "Eti-Osa"
+  Lekki-Ajah, Ajah, Sangotedo, Agungi, Chevron → "Eti-Osa"
+  Surulere, Adeniran Ogunsanya, Bode Thomas, Aguda, Ojuelegba → "Surulere"
+  Balogun, Idumota, Marina, Broad Street, Tinubu, Apongbon → "Lagos Island"
+  Ikeja, Allen Avenue, Alausa, Oregun, Opebi, Maryland, Palmgrove → "Ikeja"
+  Mushin, Idi-Oro, Ojuwoye, Palm Avenue, Ilasamaja → "Mushin"
+  Agege, Pen Cinema, Oke-Odo, Mangoro, Abule-Egba → "Agege"
+  Gbagada, Ogudu, Ojota, Ketu, Mile 12, Alapere → "Kosofe"
+  Somolu, Shomolu, Bariga, Ilaje, Pedro → "Shomolu"
+  Ajegunle, Olodi → "Ajeromi-Ifelodun"
+  Apapa, Kirikiri, Tin Can → "Apapa"
+  Festac, Satellite Town, Mile 2, Iba → "Amuwo-Odofin"
+  Alimosho, Egbeda, Idimu, Igando, Akowonjo, Ipaja → "Alimosho"
+  Ikorodu, Ijede, Imota, Bayeku, Agbowa → "Ikorodu"
+  Badagry, Ajara, Seme → "Badagry"
+  Epe, Lekki-Epe → "Epe"
+  Ibeju, Lakowe, Abijo, Eleko → "Ibeju-Lekki"
+  Ifako, Ijaiye, Agbado, Iju, Ogba → "Ifako-Ijaiye"
+  Ojo, Alaba, Trade Fair, Okokomaiko → "Ojo"
+  Third Mainland Bridge → "Lagos Mainland"
+- If no recognisable location is mentioned, return null (not "Lagos")."""
 
     try:
         result = _call_ai(prompt)
@@ -90,6 +124,13 @@ power line, NEPA, EKEDC, fallen cable, or electrical infrastructure of any kind.
     incident.ai_confidence     = result.get('ai_confidence', 0.0)
     incident.fraud_score       = result.get('fraud_score', 0.0)
     incident.is_infrastructure = result.get('is_infrastructure', False)
+
+    # v7.3: save AI-extracted LGA zone; reject generic "Lagos" fallbacks
+    ai_zone = (result.get('zone_name') or '').strip()
+    if ai_zone.lower() in ('lagos', 'lagos state', 'lagos nigeria', ''):
+        ai_zone = ''
+    if ai_zone:
+        incident.zone_name = ai_zone
 
     if not result.get('eligible') or incident.fraud_score > 0.7:
         _transition(incident, 'REJECTED', 'AI', result.get('rejection_reason', ''))

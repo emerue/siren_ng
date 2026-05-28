@@ -14,6 +14,46 @@ before starting the next. Do not skip ahead.
 If you are applying v6 updates to an existing v5 MVP, skip to SECTION 20.
 
 ================================================================================
+WHAT CHANGED IN v7.3 — NOTIFICATION BUG FIX + ADMIN INTEGRITY (May 2026)
+================================================================================
+
+Section 7.1  — reporter_phone max_length corrected from 20 to 30.
+               Twilio canonical WhatsApp IDs take the form
+               "whatsapp:+XXXXXXXXXXX" (up to 23 characters). The previous
+               limit of 20 caused DB truncation errors that silently broke
+               all reporter notification delivery (verified, rejected,
+               verifying, resolved messages).
+               Migration: 0006_increase_reporter_phone_max_length.
+
+Section 15   — Admin bulk actions corrected. Previous stub implementation
+               called qs.update(status='...') directly, bypassing:
+                 - ResponseLog audit entries
+                 - WebSocket broadcast_update() calls
+                 - All downstream notification tasks
+               All three actions now iterate per incident, call _transition()
+               + incident.save(), and fire the appropriate task:
+                 mark_verified  → _post_verification_actions(incident)
+                 mark_resolved  → sets resolved_at + notify_reporter_resolved.delay()
+                 mark_rejected  → _notify_rejected(incident, reason)
+
+Section 23.4 — CORRECTED. reporter_phone IS stored with the Twilio
+               "whatsapp:+..." identifier at incident creation. This is
+               required for all reporter notification callbacks. The original
+               rule ("always blank") was written before notification tasks
+               existed and is superseded by this version. Invariant #4
+               updated accordingly.
+
+Section 10.4 — NEW: LGA Zone Extraction. AI prompt now instructs the model
+               to return a specific Lagos LGA in zone_name, never the generic
+               string "Lagos". Full neighbourhood-to-LGA mapping embedded in
+               prompt. zone_name is saved to incident after AI response;
+               values of "Lagos", "Lagos State", or "Lagos Nigeria" are
+               discarded (treated as null). Critical for Guardian Mode
+               subscriber matching, which keys on exact LGA names.
+
+Everything in Sections 1–22 from v7.2 is unchanged unless explicitly noted.
+
+================================================================================
 WHAT CHANGED IN v7.2 — WHATSAPP MEDIA FIX (May 2026)
 ================================================================================
 
@@ -730,7 +770,7 @@ class Incident(models.Model):
                        choices=[('WHATSAPP', 'WhatsApp'), ('WEB', 'Web Portal')])
     external_id    = models.CharField(max_length=200, blank=True)
     reporter_hash  = models.CharField(max_length=64)
-    reporter_phone = models.CharField(max_length=20, blank=True)
+    reporter_phone = models.CharField(max_length=30, blank=True)  # v7.3: increased from 20
 
     incident_type = models.CharField(max_length=20, choices=IncidentType.choices, blank=True)
     description   = models.TextField()
@@ -1529,11 +1569,38 @@ class IncidentAdmin(admin.ModelAdmin):
     search_fields = ['description', 'address_text', 'zone_name']
     ordering     = ['-created_at']
     readonly_fields = ['id', 'reporter_hash', 'ai_raw_response', 'created_at', 'updated_at']
-    actions = ['mark_verified', 'mark_resolved', 'mark_rejected']
+    actions = ['mark_verified', 'mark_resolved', 'mark_rejected', 'run_ai_verification']
 
-    def mark_verified(self, req, qs): qs.update(status='VERIFIED')
-    def mark_resolved(self, req, qs): qs.update(status='RESOLVED')
-    def mark_rejected(self, req, qs): qs.update(status='REJECTED')
+    # v7.3: actions now call _transition() per incident and fire downstream tasks
+    def mark_verified(self, req, qs):
+        from .tasks import _transition, _post_verification_actions
+        for incident in qs:
+            if incident.status != 'VERIFIED':
+                _transition(incident, 'VERIFIED', 'admin', 'Manually verified via admin panel')
+                incident.save()
+                _post_verification_actions(incident)
+    mark_verified.short_description = 'Mark selected as VERIFIED (with audit log)'
+
+    def mark_resolved(self, req, qs):
+        from .tasks import _transition
+        from apps.whatsapp.tasks import notify_reporter_resolved
+        from django.utils import timezone
+        for incident in qs:
+            if incident.status != 'RESOLVED':
+                _transition(incident, 'RESOLVED', 'admin', 'Resolved via admin panel')
+                incident.resolved_at = timezone.now()
+                incident.save()
+                notify_reporter_resolved.delay(str(incident.id))
+    mark_resolved.short_description = 'Mark selected as RESOLVED (with audit log)'
+
+    def mark_rejected(self, req, qs):
+        from .tasks import _transition, _notify_rejected
+        for incident in qs:
+            if incident.status != 'REJECTED':
+                _transition(incident, 'REJECTED', 'admin', 'Rejected via admin panel')
+                incident.save()
+                _notify_rejected(incident, 'Manually rejected via admin panel')
+    mark_rejected.short_description = 'Mark selected as REJECTED (with audit log)'
 
 ================================================================================
 SECTION 16 — BUILD PHASES
@@ -3553,18 +3620,22 @@ Rule: ALL user-supplied text inserted into AI prompts MUST be sandboxed
 
 File: apps/whatsapp/handlers.py — create_incident_from_message
 
-Phone numbers are NEVER stored raw in Incident records.
-  - reporter_hash = SHA-256(phone_number) — stored
-  - reporter_phone = BLANK — never written
+Phone number storage (UPDATED v7.3):
+  - reporter_hash  = SHA-256(phone_number) — always stored; used for lookups
+  - reporter_phone = Twilio WhatsApp ID ("whatsapp:+XXXXXXXXXXX") — stored at
+                     incident creation; required for notification delivery
 
-Incident queries that previously used reporter_phone now use reporter_hash:
-  - handle_location_message: queries by reporter_hash
+reporter_phone is populated by create_incident_from_message (handlers.py)
+from the Twilio "From" field. It is NOT exposed via the public REST API
+(serializer excludes it). The value is used exclusively to send WhatsApp
+callbacks (verified, rejected, verifying, resolved) back to the reporter.
 
-The reporter_phone field remains in the DB schema (blank=True) for backwards
-compatibility only. It will never be populated by new code.
+Incident queries use reporter_hash for identity lookups (e.g. location
+attachment in handle_location_message).
 
-Rule: No user PII (phone numbers, IPs, names) may be stored in plaintext
-      on Incident records. Always hash. reporter_hash is the identity token.
+Privacy constraint: reporter_phone must never appear in API responses,
+logs at INFO level, or be included in WebSocket broadcasts. It is an
+internal delivery channel only.
 
 --------------------------------------------------------------------------------
 23.5 INVARIANTS — THESE MUST NEVER BE BROKEN
@@ -3578,8 +3649,9 @@ Rule: No user PII (phone numbers, IPs, names) may be stored in plaintext
 3.  User input in AI prompts MUST be delimited. Never trust user text as
     part of the system prompt without sandboxing.
 
-4.  reporter_phone MUST remain blank on all new Incident records.
-    reporter_hash is the only phone identifier stored.
+4.  reporter_phone stores the Twilio "whatsapp:+..." identifier (max 30 chars)
+    for notification delivery. It MUST NOT appear in API responses or logs.
+    reporter_hash is the identity token used for all DB queries.
 
 5.  Rate limit keys MUST be derived from a hash of the phone number,
     not from the raw phone number (protects PII in cache).
@@ -3592,4 +3664,4 @@ Rule: No user PII (phone numbers, IPs, names) may be stored in plaintext
 - HSTS preloading via Railway/Cloudflare
 - Supabase row-level security (RLS) on incident-media bucket
 - API key rotation schedule for Twilio, Anthropic, Paystack
-- Periodic audit of reporter_phone field — confirm always blank on new records
+- Periodic audit: confirm reporter_phone never leaks into API responses or INFO logs

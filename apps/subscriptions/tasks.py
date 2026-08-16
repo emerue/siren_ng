@@ -51,14 +51,18 @@ def notify_location_subscribers(incident_id):
     severity = incident.severity or "UNKNOWN"
     tracking_url = f"https://sirenng-production.up.railway.app/track/{incident.id}"
 
+    # v8 Promise Invariant (§8): state only what Siren did. Verification is
+    # human-confirmed ("Siren coordinator"), never "AI verified" (§5.1.2).
     message = (
-        f"\U0001f6a8 GUARDIAN MODE ALERT\n\n"
+        f"\U0001f6a8 SIREN ALERT — {lga}\n\n"
         f"{incident_type_label} in {incident.zone_name}\n"
         f"Severity: {severity}\n\n"
         f"{incident.description[:150]}\n\n"
+        f"Confirmed by a Siren coordinator. Your neighbours in {lga} have been "
+        f"alerted and emergency services notified.\n\n"
         f"Track: {tracking_url}\n\n"
         f"You're receiving this because you subscribed to {lga} alerts.\n"
-        f"Reply STOP to unsubscribe."
+        f"Reply STOP {lga} to unsubscribe."
     )
 
     sent = 0

@@ -142,18 +142,20 @@ CRITICAL RULES FOR zone_name:
     incident.severity      = result.get('severity', 'MEDIUM')
     incident.set_vouch_threshold()
 
-    if incident.ai_confidence >= 0.65:
-        _transition(incident, 'VERIFIED', 'AI',
-                    f'Auto-verified. Confidence: {incident.ai_confidence:.2f}')
-        incident.save()
-        _post_verification_actions(incident)
-    elif incident.ai_confidence >= 0.4:
-        _transition(incident, 'VERIFYING', 'AI', 'Awaiting community vouches')
-        incident.save()
-        _notify_verifying(incident)
-    else:
-        _transition(incident, 'REJECTED', 'AI', 'Insufficient confidence')
-        incident.save()
+    # v8: AI CLASSIFIES ONLY — it never auto-verifies and never broadcasts.
+    # Every plausible report waits in the DETECTED queue for a human coordinator
+    # to confirm (admin "Mark VERIFIED") before any alert is sent. This is the
+    # Promise Invariant's companion rule: only human-verified incidents are ever
+    # broadcast; an unverified report reaches no one but the coordinator.
+    # (v8 BRD §5.1.2, §8.) Community vouching is HIDDEN in the MVP (returns at
+    # Phase 1.5), so the AI no longer routes to VERIFYING.
+    _transition(
+        incident, 'DETECTED', 'AI',
+        f'AI classified: {incident.incident_type or "?"}/{incident.severity}, '
+        f'{incident.zone_name or "no LGA"}, confidence {incident.ai_confidence:.2f}. '
+        f'Awaiting coordinator confirmation.'
+    )
+    incident.save()
 
 
 def _transition(incident, new_status, actor, note=''):
@@ -207,13 +209,108 @@ def _post_verification_actions(incident):
     except Exception:
         pass
 
-    # v5: Commute Shield -- runs for all road/infrastructure/flood incidents
+    # v8: Notify authorities. Every human-verified incident is forwarded to
+    # LASEMA / official channels as a best-effort notification (§5.1.4, §5.4).
     try:
-        if incident.is_infrastructure or incident.incident_type in ['HAZARD', 'RTA', 'FLOOD']:
+        forward_to_authorities.delay(str(incident.id))
+    except Exception:
+        pass
+
+    # v5: Commute Shield -- OUT of the v8 MVP (§5.3, archived). Left in code but
+    # disabled by default; set ENABLE_COMMUTE_SHIELD=true to re-enable.
+    try:
+        if getattr(settings, 'ENABLE_COMMUTE_SHIELD', False) and (
+            incident.is_infrastructure or incident.incident_type in ['HAZARD', 'RTA', 'FLOOD']
+        ):
             from apps.subscriptions.tasks import notify_commute_shield
             notify_commute_shield.delay(str(incident.id))
     except Exception:
         pass
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=30)
+def forward_to_authorities(self, incident_id: str):
+    """
+    v8 §5.1.4 / §5.4 — Best-effort notification of a human-VERIFIED incident to
+    LASEMA / official channels. This is a NOTIFICATION only: delivery status is
+    logged for our audit but is NEVER surfaced to users as a promise (Promise
+    Invariant, §8). No MoU is required or awaited.
+
+    Configure any of:
+      LASEMA_FORWARD_NUMBERS  comma-separated WhatsApp numbers (whatsapp:+234...)
+      LASEMA_FORWARD_WEBHOOK  URL that accepts a JSON POST
+    If neither is set, the intent is still logged so coverage can be audited.
+    """
+    from apps.incidents.models import Incident
+
+    try:
+        incident = Incident.objects.get(id=incident_id)
+    except Incident.DoesNotExist:
+        logger.error("forward_to_authorities: incident %s not found", incident_id)
+        return
+
+    zone = incident.zone_name or incident.address_text or 'Lagos'
+    summary = (
+        f"SIREN.NG — verified incident notification\n"
+        f"Type: {incident.incident_type or 'Unclassified'}\n"
+        f"Severity: {incident.severity}\n"
+        f"LGA/Zone: {zone}\n"
+        f"Location: {incident.address_text or 'see report'}\n"
+        f"Reported: {incident.created_at:%Y-%m-%d %H:%M}\n"
+        f"Ref: {incident.id}"
+    )
+
+    numbers = [n.strip() for n in getattr(settings, 'LASEMA_FORWARD_NUMBERS', '').split(',') if n.strip()]
+    webhook = getattr(settings, 'LASEMA_FORWARD_WEBHOOK', '')
+    delivered = False
+
+    if numbers:
+        try:
+            from apps.whatsapp.tasks import send_whatsapp_text
+            for num in numbers:
+                dest = num if num.startswith('whatsapp:') else f'whatsapp:{num}'
+                send_whatsapp_text.delay(dest, summary)
+            delivered = True
+        except Exception as exc:
+            logger.error("forward_to_authorities: WhatsApp forward failed for %s: %s",
+                         incident_id, exc)
+
+    if webhook:
+        try:
+            import requests
+            requests.post(
+                webhook,
+                json={
+                    'ref': str(incident.id),
+                    'type': incident.incident_type,
+                    'severity': incident.severity,
+                    'lga': zone,
+                    'address_text': incident.address_text,
+                    'reported_at': incident.created_at.isoformat(),
+                },
+                timeout=10,
+            )
+            delivered = True
+        except Exception as exc:
+            logger.error("forward_to_authorities: webhook forward failed for %s: %s",
+                         incident_id, exc)
+
+    note = ('Forwarded to authorities (best-effort).' if delivered
+            else 'Authority forward attempted — no channel configured; logged for audit.')
+    try:
+        # Only advance the lifecycle from VERIFIED so we never clobber a
+        # concurrent RESOLVED/REJECTED transition.
+        if incident.status == 'VERIFIED':
+            _transition(incident, 'AGENCY_NOTIFIED', 'system', note)
+            incident.save(update_fields=['status'])
+        else:
+            from apps.incidents.models import ResponseLog
+            ResponseLog.objects.create(
+                incident=incident, from_status=incident.status,
+                to_status=incident.status, actor='system', note=note
+            )
+    except Exception:
+        logger.info("forward_to_authorities: %s — %s", incident_id, note)
 
 
 def _notify_rejected(incident, reason):

@@ -24,3 +24,7 @@ pytz
 
 groq
 django-ratelimit==4.1.0
+
+# Pin cbor2 to the pure-Python wheel: cbor2>=5.5 switched to a Rust build with
+# no prebuilt wheel for py3.13 on Intel macOS, which breaks `pip install` there.
+cbor2<5.5

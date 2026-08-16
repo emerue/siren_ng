@@ -16,15 +16,18 @@ def received_ack():
 
 
 def verified_notification(incident):
+    # v8 Promise Invariant (§8): state only what Siren DID (alerted neighbours,
+    # notified authorities) — never what third parties WILL do. Verification is
+    # shown as human-confirmed, never "AI verified" (§5.1.2).
     type_label = incident.incident_type or 'Incident'
     zone = incident.zone_name or incident.address_text or 'Lagos'
     tracking_url = f"{SITE_URL}/track/{incident.id}"
     return (
-        f"✅ VERIFIED — {type_label}, {zone}\n\n"
+        f"✅ Confirmed by Siren coordinator — {type_label}, {zone}\n\n"
         f"Severity: {incident.severity}\n\n"
-        f"👤 Community responder notified\n"
-        f"🏥 Nearest clinic alerted\n\n"
-        f"Track and support this incident:\n"
+        f"Your neighbours in {zone} have been alerted.\n"
+        f"We have notified emergency services.\n\n"
+        f"Track this incident:\n"
         f"{tracking_url}\n\n"
         f"Are you safe? Reply SAFE or HELP"
     )
@@ -54,12 +57,11 @@ def verifying_notification(incident):
 
 
 def resolution_closure(incident):
+    # v8: donations are OUT of the MVP (§5.3) — no fundraising language.
     zone = incident.zone_name or incident.address_text or 'the scene'
     type_label = incident.incident_type or 'Incident'
-    naira = incident.total_donations_naira
     return (
         f"✅ RESOLVED — {type_label} contained, {zone}\n\n"
-        f"Community raised ₦{naira:,.0f} for those affected.\n\n"
         f"Your report helped coordinate this response. Thank you."
     )
 
@@ -148,9 +150,9 @@ def subscription_alert(subscription, incident, distance_km):
         f"Severity: {incident.severity}\n"
         f"Location: {location}\n"
         f"Distance from {subscription.label}: {dist_str}\n\n"
-        f"Community is responding.\n"
-        f"People are contributing resources.\n\n"
-        f"Full details and support options:\n"
+        f"Confirmed by a Siren coordinator. Your neighbours here have been "
+        f"alerted and emergency services notified.\n\n"
+        f"Full details:\n"
         f"{tracking_url}\n\n"
         f"Reply STOP {subscription.label} to pause alerts for this location."
     )

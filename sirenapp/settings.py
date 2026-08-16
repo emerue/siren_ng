@@ -64,11 +64,16 @@ TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates",
 
 WSGI_APPLICATION = "sirenapp.wsgi.application"
 
+_DATABASE_URL = config("DATABASE_URL")
+# Production uses a Supabase postgres:// URL and must stay on the postgresql
+# backend. Local dev may point DATABASE_URL at sqlite:/// to run with no DB
+# server; in that case let dj-database-url infer the sqlite engine.
+_DB_IS_POSTGRES = _DATABASE_URL.startswith(("postgres://", "postgresql://"))
 DATABASES = {
     "default": dj_database_url.parse(
-        config("DATABASE_URL"),
+        _DATABASE_URL,
         conn_max_age=600,
-        engine="django.db.backends.postgresql"
+        **({"engine": "django.db.backends.postgresql"} if _DB_IS_POSTGRES else {}),
     )
 }
 
@@ -167,6 +172,14 @@ ANTHROPIC_MODEL   = config("ANTHROPIC_MODEL", default="claude-sonnet-4-6")
 AI_PROVIDER = config("AI_PROVIDER", default="groq")
 GROQ_API_KEY = config("GROQ_API_KEY", default="")
 GROQ_MODEL   = config("GROQ_MODEL", default="llama-3.3-70b-versatile")
+
+# v8 §5.1.4 — Best-effort authority (LASEMA/official) notification on VERIFIED.
+# Both optional; if neither is set the forward intent is still logged for audit.
+LASEMA_FORWARD_NUMBERS = config("LASEMA_FORWARD_NUMBERS", default="")  # comma-separated whatsapp:+234...
+LASEMA_FORWARD_WEBHOOK = config("LASEMA_FORWARD_WEBHOOK", default="")  # URL accepting a JSON POST
+
+# v8 §5.3 — Commute Shield is OUT of the MVP; disabled unless explicitly enabled.
+ENABLE_COMMUTE_SHIELD = config("ENABLE_COMMUTE_SHIELD", default=False, cast=bool)
 
 TWILIO_ACCOUNT_SID     = config("TWILIO_ACCOUNT_SID", default="")
 TWILIO_AUTH_TOKEN      = config("TWILIO_AUTH_TOKEN", default="")

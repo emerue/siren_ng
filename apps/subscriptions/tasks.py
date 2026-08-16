@@ -47,23 +47,40 @@ def notify_location_subscribers(incident_id):
         )
         return
 
+    from django.conf import settings
+    from apps.whatsapp.i18n import get_language
+
     incident_type_label = incident.incident_type or "Emergency"
     severity = incident.severity or "UNKNOWN"
-    tracking_url = f"https://sirenng-production.up.railway.app/track/{incident.id}"
+    desc = incident.description[:150]
+    tracking_url = f"{settings.SITE_URL}/track/{incident.id}"
 
     # v8 Promise Invariant (§8): state only what Siren did. Verification is
     # human-confirmed ("Siren coordinator"), never "AI verified" (§5.1.2).
-    message = (
-        f"\U0001f6a8 SIREN ALERT — {lga}\n\n"
-        f"{incident_type_label} in {incident.zone_name}\n"
-        f"Severity: {severity}\n\n"
-        f"{incident.description[:150]}\n\n"
-        f"Confirmed by a Siren coordinator. Your neighbours in {lga} have been "
-        f"alerted and emergency services notified.\n\n"
-        f"Track: {tracking_url}\n\n"
-        f"You're receiving this because you subscribed to {lga} alerts.\n"
-        f"Reply STOP {lga} to unsubscribe."
-    )
+    def _alert_message(lang):
+        if lang == 'pcm':
+            return (
+                f"\U0001f6a8 SIREN ALERT — {lga}\n\n"
+                f"{incident_type_label} for {incident.zone_name}\n"
+                f"Severity: {severity}\n\n"
+                f"{desc}\n\n"
+                f"Siren coordinator don confirm am. We don alert your neighbours "
+                f"for {lga}, we don tell emergency services.\n\n"
+                f"Follow: {tracking_url}\n\n"
+                f"Na because you subscribe to {lga} alerts you dey see this.\n"
+                f"Reply STOP {lga} to comot."
+            )
+        return (
+            f"\U0001f6a8 SIREN ALERT — {lga}\n\n"
+            f"{incident_type_label} in {incident.zone_name}\n"
+            f"Severity: {severity}\n\n"
+            f"{desc}\n\n"
+            f"Confirmed by a Siren coordinator. Your neighbours in {lga} have been "
+            f"alerted and emergency services notified.\n\n"
+            f"Track: {tracking_url}\n\n"
+            f"You're receiving this because you subscribed to {lga} alerts.\n"
+            f"Reply STOP {lga} to unsubscribe."
+        )
 
     sent = 0
     for sub in subscribers:
@@ -82,7 +99,7 @@ def notify_location_subscribers(incident_id):
             phone = f'whatsapp:{phone}'
 
         try:
-            send_whatsapp_text.delay(phone, message)
+            send_whatsapp_text.delay(phone, _alert_message(get_language(phone)))
             sent += 1
         except Exception as e:
             logger.error(

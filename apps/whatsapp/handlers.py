@@ -75,6 +75,12 @@ def route_inbound(from_number, body, media_urls, location):
     if body_upper == 'REGISTER ORG':
         return start_org_registration(from_number)
 
+    # v8 §7: language preference. PIDGIN / ENGLISH set the sender's language.
+    if body_upper in ('PIDGIN', 'PCM'):
+        return handle_set_language(from_number, 'pcm')
+    if body_upper == 'ENGLISH':
+        return handle_set_language(from_number, 'en')
+
     # LGA Guardian Mode subscription commands
     if body_upper.startswith('WATCH '):
         handle_subscribe_command(from_number, body[6:].strip())
@@ -149,7 +155,13 @@ def create_incident_from_message(from_number, body, media_urls, location):
     if media_urls:
         from apps.whatsapp.tasks import process_whatsapp_media
         process_whatsapp_media.delay(str(incident.id), media_urls)
-    send_whatsapp_text.delay(from_number, tmpl.received_ack())
+    from apps.whatsapp.i18n import get_language, has_language_preference
+    ack = tmpl.received_ack(get_language(from_number))
+    # First contact: append the bilingual language-switch hint so the sender
+    # learns they can choose Pidgin/English (v8 §7).
+    if not has_language_preference(from_number):
+        ack = f"{ack}\n\n{tmpl.language_switch_hint()}"
+    send_whatsapp_text.delay(from_number, ack)
     return incident
 
 
@@ -388,6 +400,13 @@ AVAILABLE_LGAS = [
     'Ikorodu', 'Ikeja', 'Kosofe', 'Lagos Island', 'Lagos Mainland',
     'Mushin', 'Ojo', 'Oshodi-Isolo', 'Shomolu', 'Somolu', 'Surulere',
 ]
+
+
+def handle_set_language(from_number, lang):
+    """Store the sender's language preference and confirm in that language."""
+    from apps.whatsapp.i18n import set_language
+    set_language(from_number, lang)
+    send_whatsapp_text.delay(from_number, tmpl.language_set_confirmation(lang))
 
 
 def send_available_lgas(from_number):

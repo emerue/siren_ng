@@ -20,7 +20,9 @@ At-a-glance status of the pilot spine. Detail lives in §5 (scope) and §14 (cha
 - **Human-confirm gate** — AI now *classifies only* (type/severity/LGA/confidence) and parks every plausible report in the `DETECTED` queue. It no longer auto-verifies and never broadcasts. A coordinator's admin **"Mark VERIFIED"** is the sole trigger for any alert. (§5.1.2, §8)
 - **Authority notification** — new `forward_to_authorities` Celery task fires on VERIFIED: structured summary to configured WhatsApp number(s) and/or a webhook, delivery logged, incident advanced to `AGENCY_NOTIFIED`, never surfaced to users as a promise. (§5.1.4)
 - **Promise-Invariant copy** — verified message, LGA-subscriber alert, cross-location alert, and resolution message rewritten to state only what Siren did ("your neighbours in <LGA> have been alerted; we have notified emergency services"). Removed "community responder notified / clinic alerted" and all donation/fundraising lines. (§8)
-- **LIST command** — added alongside `MY ALERTS` for viewing active LGA subscriptions. (§6 US-2)
+- **WATCH/STOP/LIST** — `LIST` added; multi-LGA `WATCH A, B` split; alias table (VI/Lekki→Eti-Osa, Yaba→Lagos Mainland, …) confirmed. (§6 US-2)
+- **English + Pidgin copy** — per-user language preference: default English, sender texts **PIDGIN / ENGLISH** to switch (stored durably on hash-keyed `WhatsAppProfile`), first contact answered bilingually. Core-loop messages (ack, verified, rejected, resolution, LGA alert) have Pidgin variants. (§7 NFR)
+- **Feature-flag system** — `settings.FEATURES` (one env switch per feature, defaults = MVP), `utils/features.py`, and `GET /api/features/`; the web nav gates HIDDEN/OUT links by flag. Flip a flag in Railway → Variables + restart to release a feature — no code change. Frontend gating written but not built (npm cert issue).
 - **AI provider** — kept switchable via `AI_PROVIDER` (groq↔anthropic); default and logic unchanged.
 
 ### 🟡 Hidden for the MVP (in code, off in the flow — may return)
@@ -32,19 +34,17 @@ At-a-glance status of the pilot spine. Detail lives in §5 (scope) and §14 (cha
 Donations UI + the 10% victim-fund cut (revoked permanently), resource boards, historical-data layer, zone safety scores/rings/drawers, commute briefings, the v7.3 web design system.
 
 ### ⏳ Outstanding for full v8 conformance
-- Multi-LGA `WATCH A, B` split + full alias table (VI/Victoria Island, Lekki → Eti-Osa).
-- ConnectPage promise-invariant copy fix ("Responders dispatched").
-- `settings.py` + `.env.example` declarations for `LASEMA_FORWARD_NUMBERS`, `LASEMA_FORWARD_WEBHOOK`, `ENABLE_COMMUTE_SHIELD`.
-- **English + Pidgin** copy at launch (§7 NFR).
-- Hiding the 🟡/🔴 features from the **web UI** (they are only disabled server-side so far).
+- **Build the frontend** so the feature-flag gating takes effect (blocked locally by an npm TLS/cert issue; Railway builds it on deploy). Optionally extend gating from nav links to full route guards.
+- Pidgin variants for the *secondary* copy (responder/org/onboarding prompts); core loop is done.
 - Outside-hours auto-reply + coordinator coverage-hours/escalation (§5.4, §7).
 - Gatekeeper onboarding kit — non-code (one-pager + QR + demo script).
 
 ### ⚠️ Verification & deployment state (be honest about this)
 - **Environment built & verified (July 2026).** Python 3.13 venv created; dependencies installed (with `cbor2<5.5` pinned — see below); `python manage.py check` → **0 issues**; `makemigrations --check` → **no missing migrations**; import + copy smoke test → **passed** (`forward_to_authorities` registered, `verify_incident_ai` confirmed not auto-broadcasting, Promise-Invariant copy asserts clean). Note: the repo ships **no unit tests** (0 collected), so verification is check + smoke-test level, not suite-level.
 - **`cbor2` pin added** to `requirements.txt` (`cbor2<5.5`): 5.5+ switched to a Rust build with no py3.13/Intel-mac wheel and breaks `pip install`; the older pure-Python wheel installs cleanly.
-- Still **local working tree only** — **not committed, not deployed.** Railway still runs pre-v8 code.
-- Next steps: finish the ⏳ list → commit onto a branch → deploy to Railway.
+- **Committed to branch `v8-pilot-spine`** (3 commits: pilot-spine, feature-flag system, English+Pidgin) — **not yet pushed, not deployed.** Railway still runs pre-v8 code. `main` is untouched.
+- New local dev affordance: `DATABASE_URL=sqlite://` now runs the app with no DB server (production postgres path unchanged). Migrations applied and app boots (HTTP 200); one new migration `whatsapp/0001_initial` (WhatsAppProfile).
+- Next steps: `git push -u origin v8-pilot-spine` → PR → review → merge to `main` (which triggers the Railway deploy, building the frontend there).
 
 ---
 

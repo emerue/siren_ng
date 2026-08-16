@@ -1,12 +1,15 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import { useAuthStore } from '../store/authStore'
+import { useFeatures } from '../hooks/useFeatures'
 
-const NAV_LINKS = [
+// Add `feature: '<flag>'` to any link to gate it behind a v8 feature flag.
+// Links without a `feature` always show. Flags come from GET /api/features/.
+const NAV_LINKS: { to: string; label: string; feature?: string }[] = [
   { to: '/',         label: 'Home' },
   { to: '/map',      label: 'Map' },
   { to: '/feed',     label: 'Feed' },
-  { to: '/guardian', label: 'Guardian' },
+  { to: '/guardian', label: 'Guardian', feature: 'guardian_web' },
   { to: '/watch',    label: 'Watch' },
   { to: '/join',     label: 'Join' },
 ]
@@ -15,6 +18,8 @@ export default function Nav() {
   const location = useLocation()
   const token = useAuthStore((s) => s.token)
   const [open, setOpen] = useState(false)
+  const { isOn } = useFeatures()
+  const navLinks = NAV_LINKS.filter((l) => !l.feature || isOn(l.feature))
 
   const active = (path: string) =>
     (path === '/' ? location.pathname === '/' : location.pathname.startsWith(path))
@@ -28,7 +33,7 @@ export default function Nav() {
 
         {/* Desktop */}
         <div className="hidden md:flex items-center gap-1 text-sm font-medium">
-          {NAV_LINKS.map(({ to, label }) => (
+          {navLinks.map(({ to, label }) => (
             <Link key={to} to={to} className={`px-3 py-2 rounded-lg transition ${active(to)}`}>
               {label}
             </Link>
@@ -66,7 +71,7 @@ export default function Nav() {
       {/* Mobile drawer */}
       {open && (
         <div className="md:hidden border-t border-border bg-white px-6 py-4 space-y-1">
-          {NAV_LINKS.map(({ to, label }) => (
+          {navLinks.map(({ to, label }) => (
             <Link
               key={to}
               to={to}

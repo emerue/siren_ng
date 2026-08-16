@@ -178,8 +178,36 @@ GROQ_MODEL   = config("GROQ_MODEL", default="llama-3.3-70b-versatile")
 LASEMA_FORWARD_NUMBERS = config("LASEMA_FORWARD_NUMBERS", default="")  # comma-separated whatsapp:+234...
 LASEMA_FORWARD_WEBHOOK = config("LASEMA_FORWARD_WEBHOOK", default="")  # URL accepting a JSON POST
 
-# v8 §5.3 — Commute Shield is OUT of the MVP; disabled unless explicitly enabled.
-ENABLE_COMMUTE_SHIELD = config("ENABLE_COMMUTE_SHIELD", default=False, cast=bool)
+# ── v8 FEATURE FLAGS ─────────────────────────────────────────
+# One switch per feature. Flip in the environment (Railway → Variables) to
+# release a feature to production — no code change, just a service restart.
+# Defaults encode the v8 MVP: the core loop is ON; every HIDDEN/OUT feature is
+# OFF until you deliberately turn it on. Read anywhere via
+# utils.features.feature_enabled("name"); the frontend reads GET /api/features/.
+FEATURES = {
+    # IN — the core loop (always on; not env-controlled)
+    "report":             True,
+    "human_verification": True,
+    "lga_alerts":         True,
+    "authority_forward":  True,
+    "tracking_page":      True,
+
+    # HIDDEN — in code, off in UI, may return (§5.2)
+    "vouching":       config("FEATURE_VOUCHING",       default=False, cast=bool),
+    "guardian_web":   config("FEATURE_GUARDIAN_WEB",   default=False, cast=bool),
+    "my_impact":      config("FEATURE_MY_IMPACT",      default=False, cast=bool),
+    "media_gallery":  config("FEATURE_MEDIA_GALLERY",  default=False, cast=bool),
+
+    # OUT — archived in v7.3, off unless explicitly re-enabled (§5.3)
+    "commute_shield":     config("ENABLE_COMMUTE_SHIELD",       default=False, cast=bool),
+    "resource_boards":    config("FEATURE_RESOURCE_BOARDS",     default=False, cast=bool),
+    "donations":          config("FEATURE_DONATIONS",           default=False, cast=bool),
+    "historical_layer":   config("FEATURE_HISTORICAL_LAYER",    default=False, cast=bool),
+    "zone_safety_scores": config("FEATURE_ZONE_SAFETY_SCORES",  default=False, cast=bool),
+}
+
+# Backward-compatible alias (referenced in apps/incidents/tasks.py).
+ENABLE_COMMUTE_SHIELD = FEATURES["commute_shield"]
 
 TWILIO_ACCOUNT_SID     = config("TWILIO_ACCOUNT_SID", default="")
 TWILIO_AUTH_TOKEN      = config("TWILIO_AUTH_TOKEN", default="")

@@ -1,5 +1,5 @@
-# SIREN.NG — BUSINESS REQUIREMENTS DOCUMENT v8.2
-**July 2026 · Status: PILOT SPINE BUILD IN PROGRESS · FRAMING LOCK PENDING SEGMENT 2**
+# SIREN.NG — BUSINESS REQUIREMENTS DOCUMENT v8.3
+**July 2026 · Status: PILOT SPINE BUILT (backend-verified, pending deploy) · FRAMING LOCK PENDING SEGMENT 2**
 **Supersedes v7.3 for all strategy, scope, and build decisions. v7.3 is demoted to TECHNICAL ARCHIVE — the as-built record of Phases 1–8 and the parking lot for post-MVP features. Consult it for implementation detail on existing code only. Where v7.3 conflicts with this document, v8 wins.**
 
 ---
@@ -118,7 +118,7 @@ Analysis rules: behavior questions (what people actually did) outrank all stated
 ### 5.1 IN (the core loop — build/verify these only)
 1. **Report** — WhatsApp message (text/voice-adjacent text/media) to the Siren number. Multilingual (English, Pidgin, Yoruba, Hausa, Igbo, mixed). Never rejected for brevity or language alone. (Built.)
 2. **Verify** — AI classifies (type, severity, LGA) as assist; a **named human coordinator confirms before any broadcast**. Users see human verification ("Confirmed by Siren coordinator"), never "AI verified." Target: median < 10 minutes report-to-verified during pilot hours. (Built — AI now classifies to the DETECTED queue only; broadcast fires solely on admin confirm. See §14 v8.2.)
-3. **Alert** — all active subscribers in the incident's LGA receive a WhatsApp template alert (approved business-initiated template; SID held in env `TWILIO_TEMPLATE_ZONE_ALERT`). Subscribe/unsubscribe via WATCH / STOP <LGA> / LIST commands. (Built — WATCH/STOP/LIST wired; multi-LGA WATCH and full alias table still in progress.)
+3. **Alert** — all active subscribers in the incident's LGA receive a WhatsApp template alert (approved business-initiated template; SID held in env `TWILIO_TEMPLATE_ZONE_ALERT`). Subscribe/unsubscribe via WATCH / STOP <LGA> / LIST commands. (Built — WATCH/STOP/LIST wired, multi-LGA `WATCH A, B`, alias table, and per-subscriber English/Pidgin all done.)
 4. **Notify authorities** — every verified incident is forwarded to LASEMA/official channels as a best-effort notification. No MoU required or awaited. (Built — `forward_to_authorities` Celery task, WhatsApp + webhook channels, delivery logged, never surfaced to users.)
 5. **Close the loop** — reporter receives a WhatsApp resolution message when the incident is marked resolved. (Built; verify end-to-end.)
 6. **Tracking page** — public per-incident status page with media. (Built.)
@@ -131,11 +131,13 @@ Commute Shield; resource boards; donations UI; historical data layer; zone safet
 
 ### 5.4 MISSING — must be specified and built for MVP
 - **Human verification workflow:** ✅ BUILT. AI classifies to the DETECTED queue and never broadcasts; only admin confirm fires downstream tasks; alerts read "Confirmed by Siren coordinator." Still to specify (non-code): coverage hours and the outside-hours auto-hold/auto-reply. Displayed coordinator name set to official register ("Siren coordinator").
-- **WATCH/STOP/LIST WhatsApp commands:** ✅ BUILT (checked before emergency-intent routing). LIST added. Remaining: multi-LGA `WATCH A, B` split and the full alias table (VI/Victoria Island, Lekki → Eti-Osa).
+- **WATCH/STOP/LIST WhatsApp commands:** ✅ BUILT (checked before emergency-intent routing). LIST, multi-LGA `WATCH A, B`, and the alias table (VI/Victoria Island, Lekki → Eti-Osa) all done.
 - **LASEMA forward task:** ✅ BUILT. `forward_to_authorities` sends a structured summary to configured WhatsApp numbers and/or a webhook on VERIFIED, logs the delivery attempt, advances the incident to AGENCY_NOTIFIED, and never surfaces delivery status to users.
+- **English + Pidgin copy:** ✅ BUILT (§7 NFR). Per-user preference (PIDGIN/ENGLISH commands, durable `WhatsAppProfile`), core-loop messages translated, first-contact bilingual. Secondary copy (responder/org prompts) still English-only.
+- **Feature-flag system:** ✅ BUILT. `settings.FEATURES` + `utils/features.py` + `GET /api/features/`; web nav gates by flag. Release an OUT/HIDDEN feature by flipping its env var in Railway and restarting. Frontend build pending (npm cert).
 - **Gatekeeper onboarding kit:** ⏳ NOT STARTED (non-code) — one-page explainer + QR + demo script for the pastor/imam; assisted-subscription flow for low-literacy members.
 
-**Also outstanding for full v8 conformance:** English + Pidgin copy at launch (NFR §7); hiding the OUT/HIDDEN features (§5.2, §5.3) from the web UI; ConnectPage promise-invariant copy fix.
+**Also outstanding for full v8 conformance:** build the frontend so flag-gating renders (blocked locally by npm cert; Railway builds on deploy); outside-hours auto-reply + coordinator coverage-hours.
 
 ---
 
@@ -160,7 +162,7 @@ Commute Shield; resource boards; donations UI; historical data layer; zone safet
 - **Availability:** webhook and alert pipeline target 99% during pilot; any incident-pipeline outage is a P0.
 - **Latency:** report acknowledgment <10s; alert fan-out to all LGA subscribers <2 min from human confirm.
 - **Verification SLA:** median <10 min during covered hours; outside covered hours, reports queue with an honest auto-reply ("received — a coordinator will confirm shortly").
-- **Language:** all user-facing WhatsApp copy available in English and Pidgin at launch.
+- **Language:** all user-facing WhatsApp copy available in English and Pidgin at launch. *(Built for the core loop: per-user preference via PIDGIN/ENGLISH, default English, first contact bilingual. Secondary copy still English-only.)*
 - **Security invariants (carried from v7.3 §23, unchanged and permanent):** Twilio signature validation before any processing; phone-hash-keyed rate limiting (10/60s), never IP-keyed; non-obvious admin URL; AI prompt sandboxing with USER INPUT delimiters; reporter_phone stored only for delivery (max 30 chars, Twilio `whatsapp:+...` format), never in API responses, INFO logs, or WebSocket payloads; reporter_hash (SHA-256) for all identity lookups.
 - **Technical stack corrections (v8 supersedes v7.3 Quick Reference):** Database connects via the **Supabase Transaction pooler (port 6543)** — this is the configuration that stabilized production; do NOT revert to direct 5432. AI verification provider is **Groq** (document the model in env); Anthropic references in v7.3 §10 are historical. IncidentMedia field names are `public_url`, `file_size` (bytes), `upload_timestamp` (v7.3 §17.4 is authoritative; §7.1 model listing is stale). No GeoDjango, no psycopg2, Haversine-with-HAVING — all unchanged.
 
@@ -261,5 +263,12 @@ Roles: Technical Owner (founder), Field/Community Lead (gatekeepers, onboarding,
 - **AI provider** — left switchable via `AI_PROVIDER` (groq↔anthropic), unchanged per instruction.
 - Still open: multi-LGA WATCH + alias table, ConnectPage copy fix, `settings.py`/`.env.example` declarations for `LASEMA_FORWARD_NUMBERS`/`LASEMA_FORWARD_WEBHOOK`/`ENABLE_COMMUTE_SHIELD`, Pidgin copy, hiding OUT/HIDDEN web features, gatekeeper kit.
 - Added §0.1 CURRENT BUILD STATE as the at-a-glance summary of this build. Verification/deployment caveat recorded there: changes are local-only, not committed, not deployed, and not yet runtime-verified (local env unbuildable on Python 3.14).
+
+**v8.2 → v8.3 (July 2026) — bilingual + feature flags.** Evidence: §7 NFR (English + Pidgin at launch) and the operational need to release OUT/HIDDEN features one at a time (§5.2/5.3). Committed on branch `v8-pilot-spine`:
+- **English + Pidgin** — per-user language preference (PIDGIN/ENGLISH commands; durable hash-keyed `WhatsAppProfile`; migration `whatsapp/0001_initial`). Core-loop copy (ack, verified, rejected, resolution, LGA alert) translated; first contact bilingual. Reporter/subscriber tasks look up language per recipient. Resolved-notification donation line removed (§5.3).
+- **Feature-flag system** — `settings.FEATURES` (one env switch per feature, defaults = MVP), `utils/features.py`, `GET /api/features/`; web nav gates HIDDEN/OUT links by flag. Release/hide a feature by flipping its env var in Railway and restarting — no code change. `ENABLE_COMMUTE_SHIELD` folded in as `FEATURES["commute_shield"]`.
+- **WATCH** — multi-LGA `WATCH A, B` split completed; alias table (VI/Lekki→Eti-Osa) confirmed.
+- **Local dev** — `DATABASE_URL=sqlite://` now runs the app with no DB server (production postgres path unchanged); `cbor2<5.5` pinned.
+- Verified: `manage.py check` 0 issues, migrations apply, app boots (HTTP 200), smoke tests pass. Not yet pushed/deployed; `main` untouched. Frontend flag-gating written but unbuilt (npm cert).
 
 *Update this document only through the change log. Every framing change must cite the evidence that forced it.*

@@ -120,7 +120,8 @@ export default function WhatsAppPage() {
       <section className="py-12 px-6 bg-green-50 border-y border-green-100">
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold text-textPrimary mb-2 text-center">What you'll receive</h2>
-          <p className="text-textMuted text-center mb-8">Alerts are AI-verified before they reach you — no spam, no false alarms.</p>
+          {/* v8 §5.1.2: verification is credited to a human coordinator, never to "AI". */}
+          <p className="text-textMuted text-center mb-8">Every alert is confirmed by a Siren coordinator before it reaches you.</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {ALERTS.map((a) => (
               <div key={a.text} className="flex items-start gap-3 bg-white rounded-xl border border-green-100 p-4">

@@ -1,13 +1,21 @@
-import { useState } from 'react'
-import Nav from '../components/Nav'
-import { useParams, Link, useSearchParams } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import { useEffect, useState } from 'react'
+import { useParams, Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
-import { formatDistanceToNow } from 'date-fns'
-import { getIncident, getResources, getDonationSummary, vouchIncident, suggestResource, claimResource, addMediaUrl, removeMediaUrl } from '../api'
+import { format, formatDistanceToNow } from 'date-fns'
+import { ArrowLeft, Link2, Check, ImageOff, MapPin } from 'lucide-react'
+import { getIncident } from '../api'
 import { useWebSocket } from '../hooks/useWebSocket'
-import type { Incident, ResourceItem, DonationSummary, IncidentMedia } from '../types'
+import { useFeatures } from '../hooks/useFeatures'
+import type { Incident, IncidentMedia } from '../types'
+import Nav from '../components/Nav'
+import Footer from '../components/Footer'
+import IncidentTimeline from '../components/IncidentTimeline'
+import { Button } from '../components/ui/Button'
+import { Container, Card, Skeleton, EmptyState, ErrorState } from '../components/ui/Primitives'
+import { StatusPill, SeverityTag, statusMeta } from '../components/ui/StatusPill'
+import { incidentTypeLabel } from '../lib/incident'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -16,586 +24,291 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    VERIFIED: 'bg-blue-100 text-blue-800',
-    RESPONDING: 'bg-green-100 text-green-800 animate-pulse',
-    VERIFYING: 'bg-yellow-100 text-amber-700 animate-pulse',
-    RESOLVED: 'bg-green-100 text-green-800',
-    AGENCY_NOTIFIED: 'bg-purple-100 text-purple-800',
-    DETECTED: 'bg-gray-100 text-gray-600',
-    REJECTED: 'bg-gray-100 text-gray-400',
-    CLOSED: 'bg-gray-100 text-gray-500',
-  }
+/**
+ * Public incident page — the product's transparency surface.
+ *
+ * It answers one question honestly: what has Siren actually done about this?
+ * Anything that would imply a third-party response is deliberately absent
+ * (§8), and features that are OUT/HIDDEN in the v8 MVP (§5.2/§5.3) render only
+ * when their feature flag is on.
+ */
+
+function CopyLinkButton() {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const t = setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(t)
+  }, [copied])
+
   return (
-    <span className={`inline-block text-sm font-bold px-3 py-1 rounded-full ${map[status] || 'bg-gray-100 text-gray-500'}`}>
-      {status.replace('_', ' ')}
-    </span>
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(window.location.href)
+          setCopied(true)
+        } catch {
+          /* clipboard unavailable — nothing useful to say to the user */
+        }
+      }}
+    >
+      {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Link2 className="h-4 w-4" aria-hidden="true" />}
+      {copied ? 'Link copied' : 'Copy link'}
+    </Button>
   )
 }
 
-function SeverityBadge({ severity }: { severity: string }) {
-  const map: Record<string, string> = {
-    CRITICAL: 'bg-red-600 text-white animate-pulse',
-    HIGH: 'bg-red-600 text-white',
-    MEDIUM: 'bg-amber-500 text-white',
-    LOW: 'bg-yellow-300 text-gray-800',
-  }
-  return (
-    <span className={`text-xs font-bold px-2 py-0.5 rounded ${map[severity] || 'bg-gray-200 text-gray-600'}`}>
-      {severity}
-    </span>
-  )
-}
+function MediaStrip({ media }: { media: IncidentMedia[] }) {
+  const images = media.filter((m) => m.media_type === 'image')
+  const [failed, setFailed] = useState<Record<string, boolean>>({})
 
-function ResourceStatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    NEEDED: 'bg-red-100 text-red-700',
-    CLAIMED: 'bg-amber-100 text-amber-700',
-    ARRIVED: 'bg-green-100 text-green-700',
-  }
-  return (
-    <span className={`text-xs font-semibold px-2 py-0.5 rounded ${map[status] || ''}`}>
-      {status}
-    </span>
-  )
-}
-
-// ── Media helpers ────────────────────────────────────────────────────────────
-function isImageUrl(url: string) {
-  return /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?.*)?$/i.test(url)
-}
-function isVideoUrl(url: string) {
-  return /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url) || /youtube\.com|youtu\.be|vimeo\.com/i.test(url)
-}
-function youtubeThumb(url: string) {
-  const m = url.match(/(?:v=|youtu\.be\/|embed\/)([\w-]{11})/)
-  return m ? `https://img.youtube.com/vi/${m[1]}/mqdefault.jpg` : null
-}
-function domainOf(url: string) {
-  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
-}
-
-function MediaGallery({
-  media,
-  mediaUrls,
-  incidentId,
-  onUrlsChanged,
-}: {
-  media: IncidentMedia[]
-  mediaUrls: string[]
-  incidentId: string
-  onUrlsChanged: (urls: string[]) => void
-}) {
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
-  const [addUrl, setAddUrl] = useState('')
-  const [adding, setAdding] = useState(false)
-  const [showAdd, setShowAdd] = useState(false)
-
-  const imageUrls = mediaUrls.filter(isImageUrl)
-  const videoUrls = mediaUrls.filter(isVideoUrl)
-  const linkUrls  = mediaUrls.filter(u => !isImageUrl(u) && !isVideoUrl(u))
-
-  const allImages = [
-    ...media.filter(m => m.media_type === 'image').map(m => ({ src: m.public_url, key: m.id.toString(), uploaded: true })),
-    ...imageUrls.map(u => ({ src: u, key: u, uploaded: false })),
-  ]
-  const allVideos = [
-    ...media.filter(m => m.media_type === 'video').map(m => ({ src: m.public_url, key: m.id.toString(), thumb: null as string | null })),
-    ...videoUrls.map(u => ({ src: u, key: u, thumb: youtubeThumb(u) })),
-  ]
-
-  const totalItems = allImages.length + allVideos.length + linkUrls.length
-
-  async function handleAddUrl() {
-    if (!addUrl.trim()) return
-    setAdding(true)
-    try {
-      const res = await addMediaUrl(incidentId, addUrl.trim())
-      onUrlsChanged(res.media_urls)
-      setAddUrl('')
-      setShowAdd(false)
-    } finally {
-      setAdding(false)
-    }
-  }
-
-  async function handleRemoveUrl(url: string) {
-    const res = await removeMediaUrl(incidentId, url)
-    onUrlsChanged(res.media_urls)
+  if (images.length === 0) {
+    return (
+      <p className="flex items-center gap-2 text-caption text-ink-muted">
+        <ImageOff className="h-4 w-4" aria-hidden="true" />
+        No photos were attached to this report.
+      </p>
+    )
   }
 
   return (
-    <div className="bg-white rounded-xl border border-border p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-textPrimary">
-          Media & Sources
-          {totalItems > 0 && (
-            <span className="ml-2 text-xs font-normal text-gray-400">
-              {totalItems} item{totalItems !== 1 ? 's' : ''}
-            </span>
-          )}
-        </h3>
-        <button
-          onClick={() => setShowAdd(v => !v)}
-          className="text-xs text-primary font-semibold hover:underline"
-        >
-          + Add URL
-        </button>
-      </div>
-
-      {showAdd && (
-        <div className="flex gap-2">
-          <input
-            value={addUrl}
-            onChange={e => setAddUrl(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAddUrl()}
-            placeholder="Paste image, video or article URL…"
-            className="flex-1 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary"
-            autoFocus
-          />
-          <button
-            onClick={handleAddUrl}
-            disabled={adding || !addUrl.trim()}
-            className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
+    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {images.map((m) => (
+        <li key={m.id}>
+          <a
+            href={m.public_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block overflow-hidden rounded-md border border-line bg-sunken"
           >
-            {adding ? '…' : 'Add'}
-          </button>
-        </div>
-      )}
+            {failed[m.id] ? (
+              <div className="flex aspect-[4/3] items-center justify-center text-ink-faint">
+                <ImageOff className="h-5 w-5" aria-hidden="true" />
+              </div>
+            ) : (
+              <img
+                src={m.public_url}
+                alt="Photo submitted with this incident report"
+                loading="lazy"
+                decoding="async"
+                width={400}
+                height={300}
+                className="aspect-[4/3] w-full object-cover"
+                onError={() => setFailed((f) => ({ ...f, [m.id]: true }))}
+              />
+            )}
+          </a>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
-      {totalItems === 0 && !showAdd && (
-        <p className="text-sm text-gray-400">No media attached. Use + Add URL to link an image, video or news article.</p>
-      )}
-
-      {allImages.length > 0 && (
-        <div className="grid grid-cols-3 gap-2">
-          {allImages.map((img) => (
-            <div key={img.key} className="relative group">
-              <button
-                onClick={() => setLightboxSrc(img.src)}
-                className="w-full aspect-square rounded-lg overflow-hidden bg-gray-100 block"
-              >
-                <img
-                  src={img.src}
-                  alt=""
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                  onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }}
-                />
-              </button>
-              {!img.uploaded && (
-                <button
-                  onClick={() => handleRemoveUrl(img.src)}
-                  className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 text-xs hidden group-hover:flex items-center justify-center leading-none"
-                  title="Remove"
-                >×</button>
-              )}
+function LoadingSkeleton() {
+  return (
+    <Container size="prose" className="py-8">
+      <Skeleton className="h-4 w-28" />
+      <Card className="mt-4 p-6">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="mt-3 h-8 w-64" />
+        <Skeleton className="mt-3 h-4 w-full" />
+        <Skeleton className="mt-2 h-4 w-3/4" />
+      </Card>
+      <Card className="mt-4 p-6">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="mb-5 flex gap-3">
+            <Skeleton className="h-8 w-8 rounded-full" />
+            <div className="flex-1">
+              <Skeleton className="h-4 w-44" />
+              <Skeleton className="mt-2 h-3 w-full" />
             </div>
-          ))}
-        </div>
-      )}
-
-      {allVideos.length > 0 && (
-        <div className="space-y-2">
-          {allVideos.map((v) => (
-            <div key={v.key} className="relative group">
-              <a
-                href={v.src}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl overflow-hidden border border-gray-100 hover:border-gray-300 transition bg-gray-50 hover:bg-gray-100"
-              >
-                {v.thumb ? (
-                  <img src={v.thumb} alt="" className="w-24 h-16 object-cover shrink-0" />
-                ) : (
-                  <div className="w-24 h-16 bg-gray-900 flex items-center justify-center shrink-0">
-                    <span className="text-white text-xl">▶</span>
-                  </div>
-                )}
-                <div className="flex-1 min-w-0 py-2 pr-2">
-                  <p className="text-xs text-gray-400 mb-0.5">{domainOf(v.src)}</p>
-                  <p className="text-sm font-medium text-gray-700 truncate">{v.src}</p>
-                </div>
-                <span className="text-gray-300 pr-3 shrink-0">↗</span>
-              </a>
-              <button
-                onClick={() => handleRemoveUrl(v.src)}
-                className="absolute top-1.5 right-8 bg-black/60 text-white rounded-full w-5 h-5 text-xs hidden group-hover:flex items-center justify-center leading-none"
-                title="Remove"
-              >×</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {linkUrls.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Sources & Links</p>
-          {linkUrls.map((url) => (
-            <div key={url} className="flex items-center gap-2 group">
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-1 flex items-center gap-3 rounded-xl border border-gray-100 hover:border-primary hover:bg-gray-50 transition px-3 py-2.5"
-              >
-                <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 text-sm">
-                  🔗
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-400 mb-0.5">{domainOf(url)}</p>
-                  <p className="text-sm text-gray-700 truncate">{url}</p>
-                </div>
-                <span className="text-gray-300 text-sm shrink-0">↗</span>
-              </a>
-              <button
-                onClick={() => handleRemoveUrl(url)}
-                className="text-gray-300 hover:text-red-400 transition hidden group-hover:block px-1 text-lg leading-none"
-                title="Remove"
-              >×</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {lightboxSrc && (
-        <div
-          className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4"
-          onClick={() => setLightboxSrc(null)}
-        >
-          <button
-            className="absolute top-4 right-4 text-white text-2xl w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition"
-            onClick={() => setLightboxSrc(null)}
-          >×</button>
-          <img
-            src={lightboxSrc}
-            alt=""
-            className="max-w-full max-h-full rounded-xl shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          />
-        </div>
-      )}
-    </div>
+          </div>
+        ))}
+      </Card>
+    </Container>
   )
 }
 
 export default function TrackPage() {
   const { id } = useParams<{ id: string }>()
-  const [searchParams] = useSearchParams()
-  const fromCommute = searchParams.get('from') === 'commute'
-  const qc = useQueryClient()
+  const { isOn } = useFeatures()
   useWebSocket()
 
-  const [showSuggestModal, setShowSuggestModal] = useState(false)
-  const [showClaimModal, setShowClaimModal] = useState<string | null>(null)
-  const [suggestForm, setSuggestForm] = useState({ category: 'OTHER', label: '', suggested_by_name: '' })
-  const [claimForm, setClaimForm] = useState({ claimer_name: '', claimer_phone: '' })
-  const [liveMediaUrls, setLiveMediaUrls] = useState<string[] | null>(null)
-
-  const { data: incident, isLoading } = useQuery<Incident>({
+  const { data: incident, isLoading, isError, refetch } = useQuery<Incident>({
     queryKey: ['incident', id],
     queryFn: () => getIncident(id!),
     refetchInterval: 30_000,
     enabled: !!id,
   })
 
-  const { data: resources = [] } = useQuery<ResourceItem[]>({
-    queryKey: ['resources', id],
-    queryFn: () => getResources(id!),
-    refetchInterval: 30_000,
-    enabled: !!id && !!incident && ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status) && incident.status !== 'CLOSED',
-  })
+  // Keep the tab title meaningful when someone shares or bookmarks the link.
+  useEffect(() => {
+    if (!incident) return
+    const where = incident.zone_name || 'Lagos'
+    document.title = `${incidentTypeLabel(incident.incident_type)} · ${where} — Siren.ng`
+    return () => {
+      document.title = 'Siren.ng — Verified emergency alerts for Lagos neighbourhoods'
+    }
+  }, [incident])
 
-  const { data: donationSummary } = useQuery<DonationSummary>({
-    queryKey: ['donation-summary', id],
-    queryFn: () => getDonationSummary(id!),
-    refetchInterval: 30_000,
-    enabled: !!id,
-  })
-
-  const vouchMut = useMutation({
-    mutationFn: () => vouchIncident(id!, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['incident', id] }),
-  })
-
-  const suggestMut = useMutation({
-    mutationFn: (data: typeof suggestForm) =>
-      suggestResource({ ...data, incident: id, session_hash: getSession() }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['resources', id] })
-      setShowSuggestModal(false)
-      setSuggestForm({ category: 'OTHER', label: '', suggested_by_name: '' })
-    },
-  })
-
-  const claimMut = useMutation({
-    mutationFn: ({ resourceId, form }: { resourceId: string; form: typeof claimForm }) =>
-      claimResource(resourceId, { ...form, session_hash: getSession() }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['resources', id] })
-      setShowClaimModal(null)
-      setClaimForm({ claimer_name: '', claimer_phone: '' })
-    },
-  })
-
-  function getSession(): string {
-    let s = sessionStorage.getItem('siren_session')
-    if (!s) { s = Math.random().toString(36).slice(2); sessionStorage.setItem('siren_session', s) }
-    return s
-  }
-
-  if (isLoading) return <div className="flex items-center justify-center h-screen text-textMuted">Loading...</div>
-  if (!incident) return <div className="flex items-center justify-center h-screen text-textMuted">Incident not found.</div>
-
-  const isClosed = incident.status === 'CLOSED'
-  const showResourceBoard = !isClosed && ['VERIFIED', 'RESPONDING', 'AGENCY_NOTIFIED', 'RESOLVED'].includes(incident.status)
-  const mediaItems: IncidentMedia[] = incident.media ?? []
-  const mediaUrls = liveMediaUrls ?? (incident.media_urls ?? [])
+  const meta = incident ? statusMeta(incident.status) : null
 
   return (
-    <div className="min-h-screen bg-bg font-sans">
+    <div className="min-h-screen bg-canvas">
       <Nav />
 
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
-        {/* Status */}
-        <div className="bg-white rounded-xl border border-border p-6 text-center">
-          <div className="text-4xl mb-3">
-            {incident.status === 'CLOSED' ? '🗂️' : incident.status === 'RESOLVED' ? '✅' : incident.status === 'REJECTED' ? '❌' : '🚨'}
-          </div>
-          <StatusBadge status={incident.status} />
-          <div className="mt-3 flex items-center justify-center gap-2">
-            <SeverityBadge severity={incident.severity} />
-            <span className="text-textBody text-sm">{incident.incident_type}</span>
-          </div>
-          <p className="text-textMuted text-sm mt-2">{incident.zone_name || incident.address_text}</p>
-          <p className="text-textMuted text-xs mt-1">
-            {formatDistanceToNow(new Date(incident.created_at), { addSuffix: true })}
-          </p>
-          {!['CLOSED', 'RESOLVED', 'REJECTED'].includes(incident.status) && (
-            <div className="flex gap-2 justify-center mt-4">
-              <button
-                onClick={() => vouchMut.mutate()}
-                disabled={vouchMut.isPending}
-                className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition"
-              >
-                Vouch ({incident.vouch_count})
-              </button>
-              <button
-                onClick={() => { navigator.clipboard.writeText(window.location.href) }}
-                className="border border-border px-4 py-2 rounded-lg text-sm hover:border-primary transition"
-              >
-                Share
-              </button>
-            </div>
-          )}
-        </div>
+      <main id="main">
+        {isLoading && <LoadingSkeleton />}
 
-        {fromCommute && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-            <p className="text-amber-800 font-semibold text-sm">
-              This incident is on your saved commute route.
-            </p>
-          </div>
+        {isError && (
+          <Container size="prose" className="py-12">
+            <ErrorState
+              title="We could not load this incident"
+              description="The link may be wrong, or the incident feed is temporarily unavailable."
+              onRetry={() => refetch()}
+            />
+          </Container>
         )}
 
-        {/* Description */}
-        <div className="bg-white rounded-xl border border-border p-4">
-          <h3 className="font-semibold text-textPrimary mb-2">Report</h3>
-          <p className="text-textBody text-sm leading-relaxed">{incident.description}</p>
-        </div>
+        {!isLoading && !isError && !incident && (
+          <Container size="prose" className="py-12">
+            <EmptyState
+              icon={MapPin}
+              title="Incident not found"
+              description="This incident does not exist or is no longer public."
+            />
+          </Container>
+        )}
 
-        {/* Media gallery */}
-        <MediaGallery
-          media={mediaItems}
-          mediaUrls={mediaUrls}
-          incidentId={id!}
-          onUrlsChanged={setLiveMediaUrls}
-        />
-
-        {/* Map */}
-        {incident.location_lat && incident.location_lng && (
-          <div className="rounded-xl overflow-hidden border border-border" style={{ height: 220 }}>
-            <MapContainer
-              center={[incident.location_lat, incident.location_lng]}
-              zoom={15}
-              style={{ height: '100%', width: '100%' }}
-              zoomControl={false}
+        {incident && meta && (
+          <Container size="prose" className="py-8 sm:py-10">
+            <Link
+              to="/feed"
+              className="inline-flex items-center gap-1.5 text-caption font-medium text-ink-muted transition-colors duration-fast hover:text-primary-700"
             >
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-              <Marker position={[incident.location_lat, incident.location_lng]}>
-                <Popup>{incident.incident_type} — {incident.zone_name}</Popup>
-              </Marker>
-            </MapContainer>
-          </div>
-        )}
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+              All incidents
+            </Link>
 
-        {/* Response log */}
-        {(incident.response_logs || []).length > 0 && (
-          <div className="bg-white rounded-xl border border-border p-4">
-            <h3 className="font-semibold text-textPrimary mb-3">Timeline</h3>
-            <div className="space-y-3">
-              {incident.response_logs!.map((log) => (
-                <div key={log.id} className="flex gap-3 text-sm">
-                  <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0"></div>
-                  <div>
-                    <span className="font-medium">{log.to_status.replace('_', ' ')}</span>
-                    {log.note && <span className="text-textMuted"> — {log.note}</span>}
-                    <div className="text-textMuted text-xs">
-                      {formatDistanceToNow(new Date(log.created_at), { addSuffix: true })} · {log.actor}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+            {/* Header: what, where, and exactly how far along it is */}
+            <Card className="mt-4 p-6">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusPill status={incident.status} />
+                <SeverityTag severity={incident.severity} />
+              </div>
 
-        {/* Resource board */}
-        {showResourceBoard && (
-          <div className="bg-white rounded-xl border border-border p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-textPrimary">Resource Board</h3>
-              <button
-                onClick={() => setShowSuggestModal(true)}
-                className="text-primary text-sm font-semibold hover:underline"
-              >
-                + Add what you can bring
-              </button>
-            </div>
-            {resources.length === 0 && (
-              <p className="text-textMuted text-sm">No resources suggested yet. Be the first!</p>
-            )}
-            <div className="space-y-2">
-              {resources.map((item) => (
-                <div key={item.id} className="flex items-center justify-between border border-border rounded-lg p-3">
-                  <div>
-                    <span className={`font-medium text-sm ${item.status === 'ARRIVED' ? 'line-through text-textMuted' : 'text-textPrimary'}`}>
-                      {item.label}
+              <h1 className="mt-4 text-h1 sm:text-display text-ink">
+                {incidentTypeLabel(incident.incident_type)}
+                {incident.zone_name && (
+                  <span className="font-normal text-ink-muted"> · {incident.zone_name}</span>
+                )}
+              </h1>
+
+              <p className="mt-2.5 text-sm text-ink-body">{meta.description}</p>
+
+              <dl className="mt-5 flex flex-wrap gap-x-8 gap-y-3 border-t border-line pt-5">
+                <div>
+                  <dt className="text-overline uppercase text-ink-faint">Reported</dt>
+                  <dd className="mt-0.5 text-caption text-ink-body">
+                    <time dateTime={incident.created_at}>
+                      {format(new Date(incident.created_at), 'd MMM yyyy, HH:mm')}
+                    </time>
+                    <span className="text-ink-faint">
+                      {' · '}
+                      {formatDistanceToNow(new Date(incident.created_at), { addSuffix: true })}
                     </span>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <ResourceStatusBadge status={item.status} />
-                      {item.claim_count > 0 && (
-                        <span className="text-xs text-textMuted">{item.claim_count} people said they can bring it</span>
-                      )}
-                    </div>
-                  </div>
-                  {item.status !== 'ARRIVED' && (
-                    <button
-                      onClick={() => setShowClaimModal(item.id)}
-                      className="text-xs bg-primary text-white px-3 py-1 rounded-lg hover:bg-red-700"
-                    >
-                      I can bring this
-                    </button>
-                  )}
+                  </dd>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Donations */}
-        {showResourceBoard && (
-          <div className="bg-white rounded-xl border border-border p-4">
-            <h3 className="font-semibold text-textPrimary mb-1">Support this Incident</h3>
-            {donationSummary && donationSummary.donation_count > 0 && (
-              <p className="text-textMuted text-sm mb-3">
-                &#8358;{donationSummary.total_naira.toLocaleString()} raised by {donationSummary.donation_count} donor{donationSummary.donation_count !== 1 ? 's' : ''}
-              </p>
-            )}
-            <div className="grid grid-cols-1 gap-3">
-              {[
-                { fund: 'VICTIM', icon: '🏠', label: 'Victim Relief', desc: 'Help the affected family directly' },
-                { fund: 'RESPONDER', icon: '👤', label: 'Responder Appreciation', desc: 'Thank the people who showed up' },
-                { fund: 'PLATFORM', icon: '🚨', label: 'Emergency Response Fund', desc: 'Keep Siren running for the next emergency' },
-              ].map((f) => (
-                <Link
-                  key={f.fund}
-                  to={`/donate/${id}?fund=${f.fund}`}
-                  className="flex items-center gap-3 border border-border rounded-lg p-3 hover:border-primary transition"
-                >
-                  <span className="text-2xl">{f.icon}</span>
+                {incident.address_text && (
                   <div>
-                    <div className="font-medium text-textPrimary text-sm">{f.label}</div>
-                    <div className="text-textMuted text-xs">{f.desc}</div>
+                    <dt className="text-overline uppercase text-ink-faint">Location given</dt>
+                    <dd className="mt-0.5 text-caption text-ink-body">{incident.address_text}</dd>
                   </div>
-                  <span className="ml-auto text-primary text-sm font-semibold">Donate →</span>
-                </Link>
-              ))}
-            </div>
-          </div>
+                )}
+              </dl>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <CopyLinkButton />
+              </div>
+            </Card>
+
+            {/* The report itself */}
+            <Card className="mt-4 p-6">
+              <h2 className="text-h3 text-ink">What was reported</h2>
+              <p className="mt-2.5 whitespace-pre-line text-sm text-ink-body">{incident.description}</p>
+              <div className="mt-5 border-t border-line pt-5">
+                <h3 className="mb-3 text-overline uppercase text-ink-faint">Photos</h3>
+                <MediaStrip media={incident.media ?? []} />
+              </div>
+            </Card>
+
+            {/* The trust surface: what Siren did, step by step */}
+            <Card className="mt-4 p-6">
+              <h2 className="text-h3 text-ink">What Siren has done</h2>
+              <p className="mt-1.5 text-caption text-ink-muted">
+                Each step below is an action Siren took. Steps that have not happened are shown greyed out.
+              </p>
+              <div className="mt-6">
+                <IncidentTimeline
+                  status={incident.status}
+                  logs={incident.response_logs ?? []}
+                  createdAt={incident.created_at}
+                />
+              </div>
+            </Card>
+
+            {/* Map — only when we genuinely have coordinates */}
+            {incident.location_lat && incident.location_lng && (
+              <Card className="mt-4 overflow-hidden">
+                <div className="border-b border-line px-6 py-4">
+                  <h2 className="text-h3 text-ink">Approximate location</h2>
+                </div>
+                <div className="h-56">
+                  <MapContainer
+                    center={[incident.location_lat, incident.location_lng]}
+                    zoom={15}
+                    style={{ height: '100%', width: '100%' }}
+                    zoomControl={false}
+                    scrollWheelZoom={false}
+                  >
+                    <TileLayer
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution="&copy; OpenStreetMap contributors"
+                    />
+                    <Marker position={[incident.location_lat, incident.location_lng]} />
+                  </MapContainer>
+                </div>
+              </Card>
+            )}
+
+            {/*
+              Resource board and donations are OUT of the v8 MVP (§5.3) and
+              render only if their flags are enabled. Their full UIs were
+              removed with the v8 scope cut; re-enable deliberately.
+            */}
+            {isOn('resource_boards') && (
+              <Card className="mt-4 p-6">
+                <h2 className="text-h3 text-ink">Resource board</h2>
+                <p className="mt-1.5 text-caption text-ink-muted">
+                  This feature is enabled but its interface has not been rebuilt for v8.
+                </p>
+              </Card>
+            )}
+
+            <p className="mt-8 rounded-md bg-sunken px-4 py-3.5 text-caption text-ink-body">
+              Siren alerts neighbours and notifies emergency services. Siren cannot guarantee
+              that emergency services will arrive. In a life-threatening emergency, call{' '}
+              <strong className="font-semibold text-ink">767</strong> or{' '}
+              <strong className="font-semibold text-ink">112</strong>.
+            </p>
+          </Container>
         )}
-      </div>
+      </main>
 
-      {/* Suggest modal */}
-      {showSuggestModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-          <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-6">
-            <h3 className="font-bold text-lg mb-4">Suggest a Resource</h3>
-            <select
-              value={suggestForm.category}
-              onChange={(e) => setSuggestForm((f) => ({ ...f, category: e.target.value }))}
-              className="w-full border border-border rounded-lg p-2 mb-3 text-sm"
-            >
-              {['TRANSPORT', 'EQUIPMENT', 'MEDICAL', 'FOOD_WATER', 'MANPOWER', 'OTHER'].map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <input
-              value={suggestForm.label}
-              onChange={(e) => setSuggestForm((f) => ({ ...f, label: e.target.value }))}
-              placeholder="What is needed? e.g. 6-foot ladder"
-              className="w-full border border-border rounded-lg p-2 mb-3 text-sm"
-            />
-            <input
-              value={suggestForm.suggested_by_name}
-              onChange={(e) => setSuggestForm((f) => ({ ...f, suggested_by_name: e.target.value }))}
-              placeholder="Your name (optional)"
-              className="w-full border border-border rounded-lg p-2 mb-4 text-sm"
-            />
-            <div className="flex gap-2">
-              <button onClick={() => setShowSuggestModal(false)} className="flex-1 border border-border py-2 rounded-lg text-sm">Cancel</button>
-              <button
-                onClick={() => suggestMut.mutate(suggestForm)}
-                disabled={!suggestForm.label || suggestMut.isPending}
-                className="flex-1 bg-primary text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-              >
-                Submit
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Claim modal */}
-      {showClaimModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50">
-          <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-6">
-            <h3 className="font-bold text-lg mb-4">I can bring this</h3>
-            <input
-              value={claimForm.claimer_name}
-              onChange={(e) => setClaimForm((f) => ({ ...f, claimer_name: e.target.value }))}
-              placeholder="Your name (optional)"
-              className="w-full border border-border rounded-lg p-2 mb-3 text-sm"
-            />
-            <input
-              value={claimForm.claimer_phone}
-              onChange={(e) => setClaimForm((f) => ({ ...f, claimer_phone: e.target.value }))}
-              placeholder="WhatsApp number for coordination (optional)"
-              className="w-full border border-border rounded-lg p-2 mb-4 text-sm"
-            />
-            <div className="flex gap-2">
-              <button onClick={() => setShowClaimModal(null)} className="flex-1 border border-border py-2 rounded-lg text-sm">Cancel</button>
-              <button
-                onClick={() => claimMut.mutate({ resourceId: showClaimModal, form: claimForm })}
-                disabled={claimMut.isPending}
-                className="flex-1 bg-primary text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50"
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Footer />
     </div>
   )
 }

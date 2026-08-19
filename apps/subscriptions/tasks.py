@@ -14,7 +14,7 @@ def notify_location_subscribers(incident_id):
     from apps.incidents.models import Incident
     from apps.subscriptions.models import LGASubscription, LGASubscriptionAlert
     from apps.whatsapp.tasks import send_whatsapp_text
-    from django.db import IntegrityError
+    from django.db import IntegrityError, transaction
 
     try:
         incident = Incident.objects.get(id=incident_id)
@@ -84,9 +84,14 @@ def notify_location_subscribers(incident_id):
 
     sent = 0
     for sub in subscribers:
-        # Dedup: one alert per subscription+incident
+        # Dedup: one alert per subscription+incident (unique_together).
+        # The create MUST be in its own atomic block: a caught IntegrityError
+        # otherwise poisons the surrounding transaction, so every remaining
+        # subscriber silently fails to be alerted whenever this task runs
+        # inside one (e.g. CELERY_TASK_ALWAYS_EAGER during a request).
         try:
-            LGASubscriptionAlert.objects.create(subscription=sub, incident=incident)
+            with transaction.atomic():
+                LGASubscriptionAlert.objects.create(subscription=sub, incident=incident)
         except IntegrityError:
             continue
 

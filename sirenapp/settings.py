@@ -257,6 +257,13 @@ TWILIO_ACCOUNT_SID     = config("TWILIO_ACCOUNT_SID", default="")
 TWILIO_AUTH_TOKEN      = config("TWILIO_AUTH_TOKEN", default="")
 TWILIO_WHATSAPP_NUMBER = config("TWILIO_WHATSAPP_NUMBER", default="")
 
+# The public-facing Siren line shown and linked across the website.
+# Kept separate from TWILIO_WHATSAPP_NUMBER so the number the public sees can
+# be changed independently of the Twilio sender the backend transmits from
+# (e.g. when migrating to a +234 number). Falls back to the Twilio sender so
+# there is never a placeholder on the site.
+SIREN_NG_MOBILE = config("SIREN_NG_MOBILE", default="") or TWILIO_WHATSAPP_NUMBER
+
 PAYSTACK_SECRET_KEY       = config("PAYSTACK_SECRET_KEY", default="")
 PAYSTACK_PUBLIC_KEY       = config("PAYSTACK_PUBLIC_KEY", default="")
 SIREN_PAYSTACK_SUBACCOUNT = config("SIREN_PAYSTACK_SUBACCOUNT", default="")

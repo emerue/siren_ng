@@ -8,7 +8,7 @@ import { useWhatsApp } from '../hooks/useWhatsApp'
  * advertised here.
  */
 export default function Footer() {
-  const { waLink, number } = useWhatsApp()
+  const { waLink, number, hasNumber } = useWhatsApp()
 
   return (
     <footer className="border-t border-line bg-surface">
@@ -22,14 +22,16 @@ export default function Footer() {
             <p className="mt-3 text-caption text-ink-muted">
               Community emergency coordination for Lagos, on the channel people already use.
             </p>
-            <a
-              href={waLink('Hello Siren')}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 inline-block text-caption font-semibold text-primary-700 hover:underline"
-            >
-              WhatsApp {number}
-            </a>
+            {hasNumber && (
+              <a
+                href={waLink('Hello Siren')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 inline-block text-caption font-semibold text-primary-700 hover:underline"
+              >
+                WhatsApp {number}
+              </a>
+            )}
           </div>
 
           <nav aria-label="Footer" className="grid grid-cols-2 gap-x-10 gap-y-2 sm:gap-x-16">

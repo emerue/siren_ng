@@ -1,16 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { getSiteConfig } from '../api'
-import { WHATSAPP_NUMBER as BUILD_TIME_FALLBACK, buildWaLink } from '../lib/whatsapp'
+import { WHATSAPP_NUMBER as SYNC_NUMBER, buildWaLink } from '../lib/whatsapp'
 
 /**
- * The Siren WhatsApp number, resolved at RUNTIME from GET /api/config/.
+ * The public Siren line, sourced from SIREN_NG_MOBILE on the server.
  *
- * Vite inlines `import.meta.env.*` at build time, and the Docker frontend
- * stage never receives Railway's service variables — so the placeholder
- * fallback was being compiled into the production bundle. Fetching the number
- * instead means changing it is an env var + restart, with no rebuild.
+ * Django injects it into index.html, so `SYNC_NUMBER` is already correct on
+ * first paint in production and this query simply confirms it. Under the Vite
+ * dev server there is no injected config, so the fetch supplies it.
  *
- * Falls back to the build-time value until the request resolves.
+ * Changing the number is an env var + restart — never a rebuild.
  */
 export function useWhatsApp() {
   const { data } = useQuery({
@@ -18,13 +17,16 @@ export function useWhatsApp() {
     queryFn: getSiteConfig,
     staleTime: 60 * 60 * 1000,
     retry: 1,
+    // Skip the request entirely when the server already told us.
+    enabled: !SYNC_NUMBER,
   })
 
-  const number = data?.whatsapp_number?.trim() || BUILD_TIME_FALLBACK
+  const number = SYNC_NUMBER || data?.whatsapp_number?.trim() || ''
 
   return {
     number,
-    /** Pre-filled WhatsApp deep link using the resolved number. */
+    /** True once a real number is known — use to avoid rendering a blank. */
+    hasNumber: Boolean(number),
     waLink: (text?: string) => buildWaLink(number, text),
   }
 }

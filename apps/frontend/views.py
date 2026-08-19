@@ -1,3 +1,4 @@
+import json
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from pathlib import Path
@@ -32,6 +33,17 @@ def health(request):
     )
 
 
+def _public_config():
+    """Non-secret values the web client needs at runtime."""
+    number = str(getattr(settings, 'SIREN_NG_MOBILE', '') or '')
+    # Stored Twilio-side as "whatsapp:+234…"; the client wants a bare number.
+    number = number.replace('whatsapp:', '').strip()
+    return {
+        'whatsapp_number': number,
+        'site_url': getattr(settings, 'SITE_URL', ''),
+    }
+
+
 def site_config(request):
     """Public, non-secret runtime configuration for the web client.
 
@@ -45,13 +57,7 @@ def site_config(request):
 
     Only values that are already public may be added here.
     """
-    number = str(getattr(settings, 'TWILIO_WHATSAPP_NUMBER', '') or '')
-    # Stored Twilio-side as "whatsapp:+234…"; the client wants a bare number.
-    number = number.replace('whatsapp:', '').strip()
-    return JsonResponse({
-        'whatsapp_number': number,
-        'site_url': getattr(settings, 'SITE_URL', ''),
-    })
+    return JsonResponse(_public_config())
 
 
 def feature_flags(request):
@@ -69,7 +75,18 @@ def spa(request, *args, **kwargs):
     """Serve the React SPA for all non-API routes."""
     index = Path(settings.BASE_DIR) / 'frontend' / 'dist' / 'index.html'
     if index.exists():
-        return HttpResponse(index.read_text(encoding='utf-8'))
+        html = index.read_text(encoding='utf-8')
+        # Inject runtime config so the real number renders on FIRST paint.
+        # Without this the bundle briefly shows its build-time fallback before
+        # /api/config/ resolves — i.e. a wrong phone number, visibly, on the
+        # page whose entire job is to hand people off to WhatsApp.
+        payload = json.dumps(_public_config()).replace('<', r'\u003c')
+        html = html.replace(
+            '</head>',
+            f'<script>window.__SIREN_CONFIG__={payload};</script></head>',
+            1,
+        )
+        return HttpResponse(html)
     # Fallback for dev (Vite running separately)
     return HttpResponse(
         '<p>Frontend not built. Run <code>npm run build</code> inside <code>frontend/</code>.</p>',

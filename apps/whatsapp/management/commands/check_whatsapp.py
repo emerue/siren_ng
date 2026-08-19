@@ -81,9 +81,11 @@ class Command(BaseCommand):
 
         # 3. WhatsApp senders ---------------------------------------------
         found = None
+        listed_ok = False
         try:
             r = requests.get(f"{MESSAGING}/Channels/Senders", auth=auth, timeout=25)
             if r.status_code == 200:
+                listed_ok = True
                 senders = r.json().get("senders", []) or []
                 if not senders:
                     results.append((BAD, "WhatsApp senders", "No WhatsApp senders on this account."))
@@ -109,6 +111,13 @@ class Command(BaseCommand):
                 results.append((OK, "Target number", f"{target} is registered and ONLINE"))
             elif found:
                 results.append((BAD, "Target number", f"{target} exists but status is {found[1]}"))
+            elif not listed_ok:
+                # The senders API is not available on every account/edge. Absence
+                # of evidence is not evidence of absence — do not report a
+                # blocking failure we cannot actually substantiate.
+                results.append((WARN, "Target number",
+                                f"{target} could not be verified via API — confirm in the "
+                                "Console under Numbers & senders → WhatsApp (status must be Online)"))
             else:
                 results.append((BAD, "Target number",
                                 f"{target} is not a registered WhatsApp sender on this account"))
@@ -124,16 +133,23 @@ class Command(BaseCommand):
                     ap = (c.get("approval_requests") or {})
                     status = ap.get("status", "unknown")
                     if status == "approved":
-                        approved.append((c.get("sid"), c.get("friendly_name")))
+                        approved.append((
+                            c.get("sid"),
+                            c.get("friendly_name"),
+                            list((c.get("variables") or {}).keys()),
+                        ))
                 if approved:
-                    for csid, name in approved[:10]:
-                        results.append((OK, "Approved template", f"{csid}  {name or ''}"))
+                    for csid, name, variables in approved[:10]:
+                        var_note = (f"vars: {', '.join(sorted(variables))}" if variables
+                                    else "no variables")
+                        results.append((OK, "Approved template",
+                                        f"{csid}  {name or ''}  [{var_note}]"))
                 else:
                     results.append((BAD, "Approved templates",
                                     "None approved. LGA alerts are business-initiated and "
                                     "will be rejected outside the 24h window."))
                 if configured:
-                    match = [c for c, _ in approved if c == configured]
+                    match = [c for c, _, _ in approved if c == configured]
                     results.append((
                         OK if match else BAD,
                         "TWILIO_TEMPLATE_ZONE_ALERT",

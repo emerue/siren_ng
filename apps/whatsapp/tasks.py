@@ -71,9 +71,11 @@ def notify_reporter_verified(incident_id):
             incident.reporter_phone,
             incident_id,
         )
+        from apps.whatsapp.i18n import get_language
+        lang = get_language(incident.reporter_phone)
         send_whatsapp_text.delay(
             incident.reporter_phone,
-            tmpl.verified_notification(incident),
+            tmpl.verified_notification(incident, lang),
         )
         logger.info(
             "notify_reporter_verified: Message queued for %s",
@@ -100,9 +102,10 @@ def notify_reporter_rejected(incident_id, reason):
     if not incident.reporter_phone:
         return
 
+    from apps.whatsapp.i18n import get_language
     send_whatsapp_text.delay(
         incident.reporter_phone,
-        tmpl.rejected_notification(reason),
+        tmpl.rejected_notification(reason, get_language(incident.reporter_phone)),
     )
 
 
@@ -165,23 +168,30 @@ def notify_reporter_resolved(incident_id):
         to_status__in=['RESPONDING', 'AGENCY_NOTIFIED']
     ).values('actor').distinct().count()
 
+    from apps.whatsapp.i18n import get_language
+    lang = get_language(incident.reporter_phone)
+
     incident_type = incident.get_incident_type_display() if incident.incident_type else "Emergency"
     zone = incident.zone_name or "Lagos"
-    tracking_url = f"https://sirenng-production.up.railway.app/track/{incident.id}"
+    tracking_url = f"{settings.SITE_URL}/track/{incident.id}"
 
-    message = f"\u2705 Update: Your report has been resolved.\n\n"
-    message += f"{incident_type} \u2014 {zone}\n"
-    message += f"Resolved in {resolution_time}.\n"
-
-    if responder_count > 0:
-        message += f"{responder_count} responder{'s' if responder_count > 1 else ''} assisted.\n"
-
-    if incident.total_donations_kobo > 0:
-        naira = incident.total_donations_kobo / 100
-        message += f"\u20a6{naira:,.0f} raised for relief.\n"
-
-    message += f"\nThank you for reporting. You helped protect your community."
-    message += f"\n\nTrack details: {tracking_url}"
+    # v8 \u00a75.3: donations are OUT of the MVP \u2014 no fundraising language here.
+    if lang == 'pcm':
+        message = "\u2705 Update: Your report don resolve.\n\n"
+        message += f"{incident_type} \u2014 {zone}\n"
+        message += f"E resolve for {resolution_time}.\n"
+        if responder_count > 0:
+            message += f"{responder_count} responder{'s' if responder_count > 1 else ''} helam.\n"
+        message += "\nThank you for reporting. You help protect your community."
+        message += f"\n\nFollow details: {tracking_url}"
+    else:
+        message = "\u2705 Update: Your report has been resolved.\n\n"
+        message += f"{incident_type} \u2014 {zone}\n"
+        message += f"Resolved in {resolution_time}.\n"
+        if responder_count > 0:
+            message += f"{responder_count} responder{'s' if responder_count > 1 else ''} assisted.\n"
+        message += "\nThank you for reporting. You helped protect your community."
+        message += f"\n\nTrack details: {tracking_url}"
 
     try:
         send_whatsapp_text.delay(incident.reporter_phone, message)

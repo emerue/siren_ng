@@ -1,9 +1,11 @@
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from apps.frontend.views import feature_flags
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/features/', feature_flags, name='feature-flags'),
     path('api/ingest/', include('apps.whatsapp.urls')),
     path('api/incidents/', include('apps.incidents.urls')),
     path('api/responders/', include('apps.responders.urls')),

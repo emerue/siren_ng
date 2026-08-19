@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { useAuthStore } from './store/authStore'
 
 import HomePage from './pages/HomePage'
@@ -33,10 +34,32 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
 
+/**
+ * React Router does not scroll to `#hash` targets on its own. Anchor links in
+ * the nav/footer (e.g. /#how-it-works) rely on this. Honours reduced-motion.
+ */
+function ScrollToHash() {
+  const { pathname, hash } = useLocation()
+
+  useEffect(() => {
+    if (!hash) {
+      window.scrollTo({ top: 0 })
+      return
+    }
+    const el = document.querySelector(hash)
+    if (!el) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+  }, [pathname, hash])
+
+  return null
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <ScrollToHash />
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/map" element={<MapPage />} />

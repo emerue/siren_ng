@@ -126,7 +126,7 @@ export default function ConnectPage() {
               <div className="bg-white border border-border rounded-2xl rounded-tl-sm px-5 py-3.5 max-w-xs shadow-sm">
                 <p className="text-xs font-bold text-green-700 mb-1">Siren.ng</p>
                 <p className="text-sm leading-relaxed text-textPrimary">
-                  <span className="font-bold text-green-700">VERIFIED</span> — Fire incident, Surulere. Responders dispatched.<br />
+                  <span className="font-bold text-green-700">Confirmed by Siren coordinator</span> — Fire incident, Surulere. Your neighbours have been alerted and emergency services notified.<br />
                   <span className="text-blue-600 underline text-xs">Track: siren.ng/track/abc123</span>
                 </p>
                 <p className="text-[10px] text-textMuted mt-1.5">Siren.ng · ~90 seconds ago</p>

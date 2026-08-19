@@ -2,9 +2,46 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <title>Siren.ng — Verified emergency alerts for Lagos neighbourhoods</title>
+    <meta
+      name="description"
+      content="Report an emergency on WhatsApp. A Siren coordinator confirms it, your neighbours in the same LGA are alerted, and emergency services are notified."
+    />
+    <meta name="theme-color" content="#1B2A4A" />
+    <link rel="canonical" href="https://siren.ng/" />
+
+    <!-- Open Graph / social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Siren.ng" />
+    <meta property="og:title" content="Siren.ng — Verified emergency alerts for Lagos neighbourhoods" />
+    <meta
+      property="og:description"
+      content="Report an emergency on WhatsApp. A Siren coordinator confirms it, your neighbours in the same LGA are alerted, and emergency services are notified."
+    />
+    <meta property="og:url" content="https://siren.ng/" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!--
+      Fonts: preconnect + async load. Previously imported inside index.css,
+      which blocked first paint. Only the weights actually used are requested.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      media="print"
+      onload="this.media='all'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>

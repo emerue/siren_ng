@@ -75,6 +75,12 @@ def route_inbound(from_number, body, media_urls, location):
     if body_upper == 'REGISTER ORG':
         return start_org_registration(from_number)
 
+    # v8 §7: language preference. PIDGIN / ENGLISH set the sender's language.
+    if body_upper in ('PIDGIN', 'PCM'):
+        return handle_set_language(from_number, 'pcm')
+    if body_upper == 'ENGLISH':
+        return handle_set_language(from_number, 'en')
+
     # LGA Guardian Mode subscription commands
     if body_upper.startswith('WATCH '):
         handle_subscribe_command(from_number, body[6:].strip())
@@ -82,7 +88,8 @@ def route_inbound(from_number, body, media_urls, location):
     if body_upper == 'WATCH':
         send_available_lgas(from_number)
         return
-    if body_upper == 'MY ALERTS':
+    # v8 §6 US-2: LIST returns the sender's active LGA subscriptions.
+    if body_upper in ('MY ALERTS', 'LIST'):
         return show_subscriptions(from_number)
 
     # STOP <LGA or label>: try LGA unsubscribe first, fall back to COMMUTE label
@@ -148,7 +155,13 @@ def create_incident_from_message(from_number, body, media_urls, location):
     if media_urls:
         from apps.whatsapp.tasks import process_whatsapp_media
         process_whatsapp_media.delay(str(incident.id), media_urls)
-    send_whatsapp_text.delay(from_number, tmpl.received_ack())
+    from apps.whatsapp.i18n import get_language, has_language_preference
+    ack = tmpl.received_ack(get_language(from_number))
+    # First contact: append the bilingual language-switch hint so the sender
+    # learns they can choose Pidgin/English (v8 §7).
+    if not has_language_preference(from_number):
+        ack = f"{ack}\n\n{tmpl.language_switch_hint()}"
+    send_whatsapp_text.delay(from_number, ack)
     return incident
 
 
@@ -389,6 +402,13 @@ AVAILABLE_LGAS = [
 ]
 
 
+def handle_set_language(from_number, lang):
+    """Store the sender's language preference and confirm in that language."""
+    from apps.whatsapp.i18n import set_language
+    set_language(from_number, lang)
+    send_whatsapp_text.delay(from_number, tmpl.language_set_confirmation(lang))
+
+
 def send_available_lgas(from_number):
     """Reply with the list of Lagos LGAs a user can subscribe to."""
     lga_list = '\n'.join(f'• {lga}' for lga in AVAILABLE_LGAS)
@@ -404,7 +424,12 @@ def send_available_lgas(from_number):
 
 
 def handle_subscribe_command(from_number, lga):
-    """Subscribe the sender to Guardian Mode alerts for a Lagos LGA."""
+    """Subscribe the sender to Guardian Mode alerts for one or more Lagos LGAs.
+
+    v8 §6 US-2: accepts a single LGA ("WATCH Surulere") or a comma-separated
+    list ("WATCH Surulere, Yaba"). Each term is normalised through the alias
+    table (Yaba→Lagos Mainland, Isolo→Oshodi-Isolo, VI/Lekki→Eti-Osa, ...).
+    """
     from apps.subscriptions.tasks import normalize_lga_name
     from apps.subscriptions.models import LGASubscription
     from django.contrib.auth import get_user_model
@@ -413,39 +438,57 @@ def handle_subscribe_command(from_number, lga):
         send_available_lgas(from_number)
         return
 
-    normalized = normalize_lga_name(lga)
-    if not normalized or normalized not in AVAILABLE_LGAS:
-        send_whatsapp_text.delay(
-            from_number,
-            f"'{lga}' is not a recognised Lagos LGA.\n\n"
-            f"Text WATCH to see the full list."
-        )
+    terms = [t.strip() for t in lga.split(',') if t.strip()]
+    if not terms:
+        send_available_lgas(from_number)
         return
 
     User = get_user_model()
     user, _ = User.objects.get_or_create(username=from_number)
 
-    sub, created = LGASubscription.objects.get_or_create(
-        user=user,
-        lga=normalized,
-        defaults={'is_active': True, 'whatsapp_number': from_number},
-    )
+    subscribed, already, unknown, seen = [], [], [], set()
+    for term in terms:
+        normalized = normalize_lga_name(term)
+        if not normalized or normalized not in AVAILABLE_LGAS:
+            unknown.append(term)
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
 
-    if not created and sub.is_active:
-        msg = f"You are already subscribed to {normalized} alerts."
-    else:
-        if not created:
-            sub.is_active = True
-            sub.whatsapp_number = from_number
-            sub.save(update_fields=['is_active', 'whatsapp_number', 'updated_at'])
-        msg = (
-            f"Subscribed to {normalized} alerts.\n\n"
-            f"You will receive a WhatsApp message whenever an emergency is "
-            f"verified in {normalized}.\n\n"
-            f"To unsubscribe: STOP {normalized}"
+        sub, created = LGASubscription.objects.get_or_create(
+            user=user,
+            lga=normalized,
+            defaults={'is_active': True, 'whatsapp_number': from_number},
         )
+        if not created and sub.is_active:
+            already.append(normalized)
+        else:
+            if not created:
+                sub.is_active = True
+                sub.whatsapp_number = from_number
+                sub.save(update_fields=['is_active', 'whatsapp_number', 'updated_at'])
+            subscribed.append(normalized)
 
-    send_whatsapp_text.delay(from_number, msg)
+    lines = []
+    if subscribed:
+        where = "these areas" if len(subscribed) > 1 else subscribed[0]
+        lines.append(
+            "Subscribed to alerts for: " + ", ".join(subscribed) + ".\n"
+            "You will receive a WhatsApp message whenever an emergency is "
+            f"verified in {where}."
+        )
+    if already:
+        lines.append("Already subscribed to: " + ", ".join(already) + ".")
+    if unknown:
+        lines.append(
+            "Not recognised: " + ", ".join(unknown) + ".\n"
+            "Text WATCH to see the full list of Lagos LGAs."
+        )
+    if subscribed or already:
+        lines.append("To unsubscribe from an area: STOP <LGA name>")
+
+    send_whatsapp_text.delay(from_number, "\n\n".join(lines))
 
 
 def handle_unsubscribe_command(from_number, term):

@@ -10,6 +10,11 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// ── Feature flags (v8) ────────────────────────────────────────────────────────
+// Mirrors settings.FEATURES; lets the UI show/hide OUT/HIDDEN features per env.
+export const getFeatures = (): Promise<Record<string, boolean>> =>
+  api.get('/api/features/').then((r) => r.data.features ?? {})
+
 // ── Incidents ─────────────────────────────────────────────────────────────────
 export const getActiveIncidents = () =>
   api.get('/api/incidents/active/').then((r) => r.data)

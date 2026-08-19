@@ -1,14 +1,116 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-* { box-sizing: border-box; }
-body { margin: 0; background: #FAFAFA; font-family: 'Inter', sans-serif; color: #0D0D0D; }
-#root { min-height: 100vh; }
+/**
+ * Base layer. Fonts are loaded in index.html with preconnect (not @import)
+ * so they do not block the critical rendering path.
+ */
+@layer base {
+  :root {
+    /* Consumed by leaflet/recharts and anything outside Tailwind's reach. */
+    --siren-canvas: #F7F8FA;
+    --siren-surface: #FFFFFF;
+    --siren-line: #E4E7EC;
+    --siren-ink: #111827;
+    --siren-primary: #1B2A4A;
+  }
 
-@keyframes ping-slow {
-  0% { transform: scale(1); opacity: 1; }
-  75%, 100% { transform: scale(2); opacity: 0; }
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background-color: theme('colors.canvas');
+    color: theme('colors.ink.DEFAULT');
+    font-family: theme('fontFamily.sans');
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  /* Headings inherit the display tracking defined in the type scale. */
+  h1, h2, h3, h4 {
+    color: theme('colors.ink.DEFAULT');
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /**
+   * Accessible focus. Visible for keyboard users, suppressed for mouse users.
+   * Every interactive element gets this — previously there were no focus
+   * styles anywhere in the app.
+   */
+  :focus-visible {
+    outline: 2px solid theme('colors.primary.500');
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Never remove focus for keyboard users, even on custom controls. */
+  [tabindex]:focus:not(:focus-visible),
+  button:focus:not(:focus-visible),
+  a:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Respect the user's motion preference (WCAG 2.2). */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
-.pulse-dot { animation: ping-slow 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; }
+
+@layer components {
+  /* Skip link — keyboard users can bypass the nav. */
+  .skip-link {
+    @apply sr-only;
+  }
+  .skip-link:focus {
+    @apply not-sr-only fixed left-4 top-4 z-50 rounded-md bg-primary px-4 py-2 text-ink-invert shadow-md;
+  }
+
+  /* Loading skeleton shimmer. */
+  .skeleton {
+    @apply relative overflow-hidden bg-sunken rounded;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background-image: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0,
+      rgba(255, 255, 255, 0.6) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+  }
+}
+
+/* Hide scrollbars on horizontal rails without losing scrollability. */
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }

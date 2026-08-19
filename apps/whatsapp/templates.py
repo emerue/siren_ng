@@ -7,7 +7,13 @@ from django.conf import settings
 SITE_URL = getattr(settings, 'SITE_URL', 'https://sirenng-production.up.railway.app')
 
 
-def received_ack():
+def received_ack(lang='en'):
+    if lang == 'pcm':
+        return (
+            "We don receive am — we dey verify now.\n"
+            "E no dey usually pass 90 seconds.\n"
+            "We go update you sharp sharp."
+        )
     return (
         "Received — verifying now.\n"
         "Usually takes under 90 seconds.\n"
@@ -15,22 +21,55 @@ def received_ack():
     )
 
 
-def verified_notification(incident):
+def language_switch_hint():
+    """Bilingual one-liner appended to the first-contact ack."""
+    return "Reply PIDGIN for Pidgin • ENGLISH for English"
+
+
+def language_set_confirmation(lang):
+    if lang == 'pcm':
+        return "Language don change to Pidgin. Reply ENGLISH anytime to go back."
+    return "Language set to English. Reply PIDGIN anytime to switch to Pidgin."
+
+
+def verified_notification(incident, lang='en'):
+    # v8 Promise Invariant (§8): state only what Siren DID (alerted neighbours,
+    # notified authorities) — never what third parties WILL do. Verification is
+    # shown as human-confirmed, never "AI verified" (§5.1.2).
     type_label = incident.incident_type or 'Incident'
     zone = incident.zone_name or incident.address_text or 'Lagos'
     tracking_url = f"{SITE_URL}/track/{incident.id}"
+    if lang == 'pcm':
+        return (
+            f"✅ Siren coordinator don confirm am — {type_label}, {zone}\n\n"
+            f"Severity: {incident.severity}\n\n"
+            f"We don alert your neighbours for {zone}.\n"
+            f"We don tell emergency services.\n\n"
+            f"Follow this incident:\n"
+            f"{tracking_url}\n\n"
+            f"You dey safe? Reply SAFE or HELP"
+        )
     return (
-        f"✅ VERIFIED — {type_label}, {zone}\n\n"
+        f"✅ Confirmed by Siren coordinator — {type_label}, {zone}\n\n"
         f"Severity: {incident.severity}\n\n"
-        f"👤 Community responder notified\n"
-        f"🏥 Nearest clinic alerted\n\n"
-        f"Track and support this incident:\n"
+        f"Your neighbours in {zone} have been alerted.\n"
+        f"We have notified emergency services.\n\n"
+        f"Track this incident:\n"
         f"{tracking_url}\n\n"
         f"Are you safe? Reply SAFE or HELP"
     )
 
 
-def rejected_notification(reason):
+def rejected_notification(reason, lang='en'):
+    if lang == 'pcm':
+        msg = "We no fit confirm your report as emergency.\n\n"
+        if reason:
+            msg += f"Reason: {reason}\n\n"
+        msg += (
+            "If you feel say na mistake, send another message with more details.\n"
+            "For emergency wey fit kill person, call 767 (Lagos State Emergency)."
+        )
+        return msg
     msg = (
         "Your report could not be verified as an emergency.\n\n"
     )
@@ -53,13 +92,17 @@ def verifying_notification(incident):
     )
 
 
-def resolution_closure(incident):
+def resolution_closure(incident, lang='en'):
+    # v8: donations are OUT of the MVP (§5.3) — no fundraising language.
     zone = incident.zone_name or incident.address_text or 'the scene'
     type_label = incident.incident_type or 'Incident'
-    naira = incident.total_donations_naira
+    if lang == 'pcm':
+        return (
+            f"✅ E DON RESOLVE — {type_label} don calm down, {zone}\n\n"
+            f"Your report help make people fit respond. Thank you well well."
+        )
     return (
         f"✅ RESOLVED — {type_label} contained, {zone}\n\n"
-        f"Community raised ₦{naira:,.0f} for those affected.\n\n"
         f"Your report helped coordinate this response. Thank you."
     )
 
@@ -148,9 +191,9 @@ def subscription_alert(subscription, incident, distance_km):
         f"Severity: {incident.severity}\n"
         f"Location: {location}\n"
         f"Distance from {subscription.label}: {dist_str}\n\n"
-        f"Community is responding.\n"
-        f"People are contributing resources.\n\n"
-        f"Full details and support options:\n"
+        f"Confirmed by a Siren coordinator. Your neighbours here have been "
+        f"alerted and emergency services notified.\n\n"
+        f"Full details:\n"
         f"{tracking_url}\n\n"
         f"Reply STOP {subscription.label} to pause alerts for this location."
     )

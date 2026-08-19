@@ -14,22 +14,13 @@ from rest_framework import status
 
 from apps.incidents.models import Incident
 from apps.incidents.tasks import verify_incident_ai
+from utils.ratelimit import hit_rate_limit, masked
+
+# Bound the stored/AI-processed report text. Unbounded input inflates the
+# AI prompt (cost + injection surface) and the database row.
+MAX_DESCRIPTION_CHARS = 2000
 
 logger = logging.getLogger(__name__)
-
-
-def _wa_rate_limit(from_number: str, rate: int = 10, window: int = 60) -> bool:
-    """
-    Cache-based rate limiter keyed by sender phone number.
-    Returns True if the request should be blocked (rate exceeded).
-    10 messages per 60-second window per WhatsApp number.
-    """
-    key = f'wa_rl:{hashlib.sha256(from_number.encode()).hexdigest()[:16]}'
-    count = cache.get(key, 0)
-    if count >= rate:
-        return True
-    cache.set(key, count + 1, window)
-    return False
 
 
 @csrf_exempt
@@ -61,12 +52,13 @@ def whatsapp_ingest(request):
     # Extract fields
     from_raw = request.POST.get('From', '')
     from_number = from_raw.replace('whatsapp:', '')
-    body = request.POST.get('Body', '').strip()
+    body = request.POST.get('Body', '').strip()[:MAX_DESCRIPTION_CHARS]
 
-    # Rate limit: 10 messages/min per sender
-    if _wa_rate_limit(from_number):
-        logger.warning("Rate limit exceeded for %s", from_number[:6] + '****')
-        return HttpResponse('', status=200)  # Return 200 so Twilio doesn't retry
+    # Rate limit: 10 messages/60s per sender, keyed on the NORMALISED phone
+    # hash (BRD §7) so reformatting the number cannot reset the quota.
+    if hit_rate_limit(from_number, rate=10, window=60, scope='wa'):
+        logger.warning("whatsapp_ingest: rate limit exceeded for %s", masked(from_number))
+        return HttpResponse('', status=200)  # 200 so Twilio does not retry
 
     num_media = int(request.POST.get('NumMedia', 0))
     media_urls = [
@@ -97,22 +89,44 @@ def whatsapp_ingest(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def web_ingest(request):
-    description = request.data.get('description', '').strip()
+    """Public web report intake.
+
+    SECURITY: this endpoint was previously unauthenticated AND unthrottled,
+    and passed `media_urls` straight from the request body into the model —
+    letting anyone attach arbitrary URLs to a public incident page and spam
+    incident creation (each of which triggers a paid AI call).
+    """
+    description = str(request.data.get('description', '') or '').strip()
     if not description:
         return Response({'error': 'description is required'}, status=status.HTTP_400_BAD_REQUEST)
+    description = description[:MAX_DESCRIPTION_CHARS]
 
-    ip = request.META.get('HTTP_X_FORWARDED_FOR', request.META.get('REMOTE_ADDR', 'unknown'))
-    reporter_hash = hashlib.sha256(ip.encode()).hexdigest()
+    # NOTE: behind Railway's proxy X-Forwarded-For is the only per-client
+    # signal available, and a determined attacker can spoof it. This throttle
+    # is therefore best-effort abuse reduction, not an authorisation control.
+    client_ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() \
+        or request.META.get('REMOTE_ADDR', 'unknown')
+    if hit_rate_limit(client_ip, rate=5, window=60, scope='web'):
+        logger.warning("web_ingest: rate limit exceeded")
+        return Response({'error': 'Too many reports. Please wait a moment.'},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def _coord(value):
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            return None
+        return f if -180 <= f <= 180 else None
 
     incident = Incident.objects.create(
         source='WEB',
-        reporter_hash=reporter_hash,
+        reporter_hash=hashlib.sha256(client_ip.encode()).hexdigest(),
         description=description,
-        location_lat=request.data.get('location_lat'),
-        location_lng=request.data.get('location_lng'),
-        address_text=request.data.get('address_text', ''),
-        incident_type=request.data.get('incident_type', ''),
-        media_urls=request.data.get('media_urls', []),
+        location_lat=_coord(request.data.get('location_lat')),
+        location_lng=_coord(request.data.get('location_lng')),
+        address_text=str(request.data.get('address_text', '') or '')[:500],
+        # incident_type/media_urls are NOT accepted from the client:
+        # classification is the AI's job and media URLs are staff-managed.
         status='DETECTED',
     )
 

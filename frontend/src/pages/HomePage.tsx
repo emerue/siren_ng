@@ -1,282 +1,463 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { getActiveIncidents, getIncidents, getZoneStats, getHistoricalIncidents } from '../api'
+import {
+  MessageSquare,
+  ShieldCheck,
+  Users,
+  Landmark,
+  CheckCircle2,
+  ArrowRight,
+  MapPin,
+  Activity,
+} from 'lucide-react'
+import { formatDistanceToNow } from 'date-fns'
+import { getActiveIncidents } from '../api'
 import type { Incident } from '../types'
 import Nav from '../components/Nav'
-import { formatDistanceToNow } from 'date-fns'
+import Footer from '../components/Footer'
+import { ButtonLink } from '../components/ui/Button'
+import { Container, Section, SectionHeading, Card, Skeleton, EmptyState } from '../components/ui/Primitives'
+import { StatusPill, SeverityTag } from '../components/ui/StatusPill'
+import { waLink } from '../lib/whatsapp'
+import { incidentTypeLabel } from '../lib/incident'
 
+/**
+ * Landing page.
+ *
+ * The web layer is an explanation and trust surface, not the emergency
+ * reporting app — reporting happens on WhatsApp (BRD §45). The page therefore
+ * answers, in order: what is this → why care → how it works → why trust it →
+ * what Siren actually promises → what to do next.
+ *
+ * Deliberately absent (BRD §5.2/§5.3): donations, resource boards, historical
+ * data, zone safety scores, Guardian/Commute surfaces.
+ */
 
-const ZONES = ['Lagos Island', 'Surulere', 'Ikeja', 'Lekki', 'Victoria Island', 'Oshodi', 'Yaba', 'Apapa']
+/* ── Hero ──────────────────────────────────────────────────────────────── */
 
-const SEVERITY_COLOR: Record<string, string> = {
-  CRITICAL: 'bg-red-600 text-white',
-  HIGH: 'bg-red-100 text-red-700',
-  MEDIUM: 'bg-amber-100 text-amber-700',
-  LOW: 'bg-yellow-100 text-yellow-700',
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    VERIFIED: 'bg-blue-100 text-blue-800',
-    RESPONDING: 'bg-green-100 text-green-800',
-    VERIFYING: 'bg-yellow-100 text-amber-700',
-    RESOLVED: 'bg-green-100 text-green-800',
-    REJECTED: 'bg-gray-100 text-gray-500',
-    AGENCY_NOTIFIED: 'bg-purple-100 text-purple-800',
-  }
+function HeroVisual() {
   return (
-    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${map[status] || 'bg-gray-100 text-gray-500'}`}>
-      {status.replace('_', ' ')}
-    </span>
+    <div className="relative" aria-hidden="true">
+      <Card className="overflow-hidden shadow-md">
+        {/* Inbound report */}
+        <div className="border-b border-line bg-sunken/60 px-4 py-3">
+          <p className="text-overline uppercase text-ink-faint">Resident → Siren</p>
+        </div>
+        <div className="space-y-3 px-4 py-4">
+          <div className="max-w-[85%] rounded-lg rounded-tl-sm bg-sunken px-3.5 py-2.5">
+            <p className="text-sm text-ink-body">Fire for Isolo market, near the bus stop</p>
+            <p className="mt-1 text-overline text-ink-faint">11:04</p>
+          </div>
+          <div className="max-w-[85%] rounded-lg rounded-tl-sm bg-sunken px-3.5 py-2.5">
+            <p className="text-sm text-ink-body">Received — a coordinator is confirming it now.</p>
+            <p className="mt-1 text-overline text-ink-faint">11:04</p>
+          </div>
+        </div>
+
+        {/* Human verification — the pivot of the whole product */}
+        <div className="flex items-center gap-2.5 border-y border-line bg-primary-50 px-4 py-3">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-primary-700" />
+          <p className="text-caption font-semibold text-primary-700">
+            Confirmed by a Siren coordinator · 6 min
+          </p>
+        </div>
+
+        {/* Outbound alert */}
+        <div className="px-4 py-4">
+          <p className="mb-2.5 text-overline uppercase text-ink-faint">Siren → Neighbours in Oshodi-Isolo</p>
+          <div className="rounded-lg border border-line bg-surface px-3.5 py-3">
+            <div className="flex items-center gap-2">
+              <SeverityTag severity="HIGH" />
+              <span className="text-caption font-semibold text-ink">Fire · Oshodi-Isolo</span>
+            </div>
+            <p className="mt-2 text-caption text-ink-body">
+              Confirmed by a Siren coordinator. Your neighbours here have been alerted and
+              emergency services notified.
+            </p>
+          </div>
+        </div>
+      </Card>
+    </div>
   )
 }
 
-const TYPE_ICON: Record<string, string> = {
-  FIRE: '🔥', FLOOD: '🌊', COLLAPSE: '🏚', RTA: '🚗',
-  EXPLOSION: '💥', DROWNING: '🆘', HAZARD: '⚡',
+function Hero() {
+  return (
+    <section className="border-b border-line bg-surface">
+      <Container className="py-14 sm:py-20">
+        <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
+          <div>
+            <p className="mb-4 inline-flex items-center gap-2 rounded-md bg-sunken px-2.5 py-1 text-overline uppercase text-ink-muted">
+              <MapPin className="h-3 w-3" aria-hidden="true" />
+              Piloting in Oshodi-Isolo, Lagos
+            </p>
+
+            {/*
+              Headline stays at display-lg rather than display-xl: in the hero's
+              ~560px column, 3.5rem broke to five ragged lines and read as shouting.
+            */}
+            <h1 className="text-display sm:text-display-lg text-ink">
+              When something happens on your street, your neighbours should know.
+            </h1>
+
+            <p className="mt-5 max-w-xl text-body-lg text-ink-body">
+              Report an emergency on WhatsApp. A Siren coordinator confirms it is real,
+              then everyone subscribed in your LGA is alerted — and emergency services
+              are notified.
+            </p>
+
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <ButtonLink
+                href={waLink('I want to report an emergency')}
+                target="_blank"
+                rel="noopener noreferrer"
+                size="lg"
+              >
+                Report on WhatsApp
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </ButtonLink>
+              <ButtonLink to="/connect" variant="secondary" size="lg">
+                Get alerts for your area
+              </ButtonLink>
+            </div>
+
+            <p className="mt-5 text-caption text-ink-muted">
+              No app to install. No account. Works on WhatsApp.
+            </p>
+          </div>
+
+          <HeroVisual />
+        </div>
+      </Container>
+    </section>
+  )
 }
 
-export default function HomePage() {
-  const { data: activeIncidents = [] } = useQuery<Incident[]>({
+/* ── Problem ───────────────────────────────────────────────────────────── */
+
+function Problem() {
+  return (
+    <Section labelledBy="problem-heading">
+      <Container>
+        <SectionHeading
+          id="problem-heading"
+          eyebrow="Why this exists"
+          title="In an emergency, most people call someone they know — not a hotline."
+          lede="Word of mouth is fast but unverified. Official lines are overwhelmed. Siren adds verification and structure to the response that already happens on your street."
+        />
+
+        <dl className="mt-10 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-3">
+          {[
+            {
+              stat: '78%',
+              label: 'call family, friends or neighbours first in a medical emergency',
+              source: 'Emergency Response Africa survey',
+            },
+            {
+              stat: '~3%',
+              label: 'call an ambulance as their first action',
+              source: 'Emergency Response Africa survey',
+            },
+            {
+              stat: '~95%',
+              label: 'of Nigerian internet users are reachable on WhatsApp',
+              source: 'Nigerian internet usage data',
+            },
+          ].map((s) => (
+            <div key={s.stat} className="bg-surface p-6">
+              <dt className="text-display text-ink">{s.stat}</dt>
+              <dd className="mt-1.5 text-sm text-ink-body">
+                {s.label}
+                <span className="mt-2 block text-overline uppercase text-ink-faint">{s.source}</span>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </Container>
+    </Section>
+  )
+}
+
+/* ── How it works ──────────────────────────────────────────────────────── */
+
+const STEPS = [
+  {
+    icon: MessageSquare,
+    title: 'Report',
+    body: 'Send what you saw to the Siren number on WhatsApp — English or Pidgin, however short. A photo helps but is not required.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'A coordinator confirms',
+    body: 'Reports are sorted automatically to speed up review, but a named Siren coordinator decides what is real. Nothing is broadcast without them.',
+  },
+  {
+    icon: Users,
+    title: 'Neighbours are alerted',
+    body: 'Everyone subscribed to that LGA gets a WhatsApp alert saying what happened and where.',
+  },
+  {
+    icon: Landmark,
+    title: 'Emergency services notified',
+    body: 'Siren forwards every confirmed incident to official channels. We tell you we sent it — we never promise what they will do.',
+  },
+  {
+    icon: CheckCircle2,
+    title: 'The loop closes',
+    body: 'When the incident is over, the person who reported it is told, and the record stays open to view.',
+  },
+]
+
+function HowItWorks() {
+  return (
+    <Section tone="surface" id="how-it-works" labelledBy="how-heading">
+      <Container>
+        <SectionHeading
+          id="how-heading"
+          eyebrow="How it works"
+          title="One report, five steps, no guesswork."
+          lede="Every step is something Siren actually does — you can watch it happen on the incident page."
+        />
+
+        <ol className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {STEPS.map((step, i) => {
+            const Icon = step.icon
+            return (
+              <li key={step.title} className="relative rounded-lg bg-sunken/70 p-5">
+                <span className="flex h-9 w-9 items-center justify-center rounded-md bg-surface text-primary-700 shadow-xs">
+                  <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+                </span>
+                <p className="mt-4 text-overline uppercase text-ink-faint">Step {i + 1}</p>
+                {/* text-sm, not h3: in a 5-up rail the larger size wrapped every
+                    title onto two ragged lines and broke the horizontal rhythm. */}
+                <h3 className="mt-1 text-sm font-semibold text-ink">{step.title}</h3>
+                <p className="mt-1.5 text-caption text-ink-body">{step.body}</p>
+              </li>
+            )
+          })}
+        </ol>
+      </Container>
+    </Section>
+  )
+}
+
+/* ── Trust ─────────────────────────────────────────────────────────────── */
+
+function Trust() {
+  return (
+    <Section labelledBy="trust-heading">
+      <Container>
+        <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
+          <div>
+            <SectionHeading
+              id="trust-heading"
+              eyebrow="Why you can trust it"
+              title="A person decides what gets sent to your neighbours."
+              lede="False alarms spread panic and destroy trust — so speed never overrides verification. Software sorts reports to make review fast; a human confirms every single one before anyone is alerted."
+            />
+            <div className="mt-7 space-y-3">
+              {[
+                'An unverified report reaches no one but the coordinator.',
+                'Every alert says who confirmed it and when.',
+                'Your phone number is never shown in an alert or on the site.',
+              ].map((line) => (
+                <div key={line} className="flex gap-2.5">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-resolved" aria-hidden="true" />
+                  <p className="text-sm text-ink-body">{line}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* The promise boundary, stated as plainly as we can put it. */}
+          <Card className="self-start p-6 sm:p-7">
+            <h3 className="text-h3 text-ink">What Siren promises — and what it does not</h3>
+            <dl className="mt-5 space-y-4">
+              <div>
+                <dt className="text-overline uppercase text-status-resolved">What we do</dt>
+                <dd className="mt-1.5 text-sm text-ink-body">
+                  We confirm the report, alert subscribed neighbours in that LGA, notify
+                  emergency services, and tell you when it is resolved.
+                </dd>
+              </div>
+              <div className="border-t border-line pt-4">
+                <dt className="text-overline uppercase text-ink-muted">What we cannot promise</dt>
+                <dd className="mt-1.5 text-sm text-ink-body">
+                  We cannot promise that an ambulance, the fire service or the police will
+                  arrive. Siren is not an emergency service, and we will never suggest
+                  otherwise.
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-5 rounded-md bg-sunken px-3.5 py-3 text-caption text-ink-body">
+              In a life-threatening emergency, call <strong className="font-semibold text-ink">767</strong> or{' '}
+              <strong className="font-semibold text-ink">112</strong> as well.
+            </p>
+          </Card>
+        </div>
+      </Container>
+    </Section>
+  )
+}
+
+/* ── Live incidents ────────────────────────────────────────────────────── */
+
+function LiveIncidents() {
+  const { data: incidents = [], isLoading, isError } = useQuery<Incident[]>({
     queryKey: ['active-incidents'],
     queryFn: getActiveIncidents,
     refetchInterval: 60_000,
   })
 
-  const { data: resolvedData } = useQuery({
-    queryKey: ['resolved-incidents'],
-    queryFn: () => getIncidents({ status: 'RESOLVED', page_size: '5' }),
-    refetchInterval: 60_000,
-  })
-  const resolved: Incident[] = resolvedData?.results || []
-
-  // Zone historical counts — powers the "Documented since 2010" line per zone card
-  const { data: zoneStats = {} } = useQuery<Record<string, number>>({
-    queryKey: ['zone-stats'],
-    queryFn: getZoneStats,
-    staleTime: 10 * 60 * 1000,
-  })
-
-  // A few historical entries to mix into the resolved ticker
-  const { data: histData } = useQuery({
-    queryKey: ['home-historical'],
-    queryFn: () => getHistoricalIncidents({ page_size: '4' }),
-    staleTime: 10 * 60 * 1000,
-  })
-  const historicalEntries: Incident[] = histData?.results || []
-
   return (
-    <div className="min-h-screen bg-bg font-sans">
-      <Nav />
-
-      {/* Hero */}
-      <section className="relative bg-gradient-to-br from-gray-900 via-slate-800 to-gray-900 text-white overflow-hidden">
-        <div className="absolute inset-0 opacity-5">
-          <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 25% 25%, white 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+    <Section tone="surface" labelledBy="live-heading">
+      <Container>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <SectionHeading
+            id="live-heading"
+            eyebrow="Transparency"
+            title="See what Siren has actually done."
+            lede="Every confirmed incident has a public page showing each step we took, and when."
+            className="mb-0"
+          />
+          <Link
+            to="/feed"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary-700 hover:underline"
+          >
+            All incidents
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
         </div>
-        <div className="relative max-w-4xl mx-auto py-20 px-6 text-center">
-          {activeIncidents.length > 0 && (
-            <div className="inline-flex items-center gap-2 bg-white/15 border border-white/20 rounded-full px-4 py-1.5 text-sm mb-6">
-              <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
-              <span className="font-medium">{activeIncidents.length} active emergency{activeIncidents.length !== 1 ? 's' : ''} in Lagos right now</span>
-            </div>
+
+        <div className="mt-8">
+          {isLoading && (
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[0, 1, 2].map((i) => (
+                <li key={i}>
+                  <Card className="p-5">
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="mt-3 h-5 w-40" />
+                    <Skeleton className="mt-2 h-4 w-full" />
+                  </Card>
+                </li>
+              ))}
+            </ul>
           )}
-          <h1 className="text-4xl sm:text-5xl font-bold mb-4 leading-tight">
-            Protect the people<br />you love.
-          </h1>
-          <p className="text-white/85 text-lg mb-10 max-w-xl mx-auto leading-relaxed">
-            Get instant alerts when emergencies happen near your home, your children's school, or anywhere your family is.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link
-              to="/watch"
-              className="flex items-center justify-center gap-2.5 bg-white text-primary font-bold px-8 py-3.5 rounded-xl hover:bg-gray-100 transition shadow-lg text-base"
-            >
-              Watch a location
-            </Link>
-            <Link
-              to="/report"
-              className="flex items-center justify-center gap-2.5 border-2 border-white/60 text-white font-semibold px-8 py-3.5 rounded-xl hover:bg-white/10 transition text-base"
-            >
-              Report an incident
-            </Link>
-          </div>
-          <p className="text-white/50 text-xs mt-6">No account required · AI-verified in ~90 seconds · Free forever</p>
+
+          {isError && (
+            <EmptyState
+              icon={Activity}
+              title="Live incidents are unavailable right now"
+              description="We could not reach the incident feed. It should return shortly."
+            />
+          )}
+
+          {!isLoading && !isError && incidents.length === 0 && (
+            <EmptyState
+              icon={CheckCircle2}
+              title="No active incidents"
+              description="Nothing is currently open in the areas Siren covers. Confirmed incidents appear here as they happen."
+              action={
+                <ButtonLink to="/feed" variant="secondary" size="sm">
+                  View past incidents
+                </ButtonLink>
+              }
+            />
+          )}
+
+          {!isLoading && !isError && incidents.length > 0 && (
+            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {incidents.slice(0, 6).map((incident) => (
+                <li key={incident.id}>
+                  <Card interactive as="article" className="h-full">
+                    <Link to={`/track/${incident.id}`} className="block h-full p-5">
+                      <div className="flex items-center gap-2">
+                        <StatusPill status={incident.status} size="sm" />
+                        <SeverityTag severity={incident.severity} />
+                      </div>
+                      <h3 className="mt-3 text-h3 text-ink">
+                        {incidentTypeLabel(incident.incident_type)}
+                        {incident.zone_name && (
+                          <span className="font-normal text-ink-muted"> · {incident.zone_name}</span>
+                        )}
+                      </h3>
+                      <p className="mt-1.5 line-clamp-2 text-caption text-ink-body">
+                        {incident.description}
+                      </p>
+                      <p className="mt-3 text-overline uppercase text-ink-faint">
+                        {formatDistanceToNow(new Date(incident.created_at), { addSuffix: true })}
+                      </p>
+                    </Link>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      </section>
+      </Container>
+    </Section>
+  )
+}
 
-      {/* Live active incidents bar */}
-      {activeIncidents.length > 0 && (
-        <section className="bg-red-50 border-b border-red-100 py-3 px-6">
-          <div className="max-w-6xl mx-auto flex items-center gap-3 overflow-x-auto scrollbar-hide">
-            <span className="text-xs font-bold text-red-600 uppercase tracking-wide shrink-0">Live</span>
-            {activeIncidents.slice(0, 6).map((inc) => (
-              <Link
-                key={inc.id}
-                to={`/track/${inc.id}`}
-                className={`shrink-0 flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full border ${SEVERITY_COLOR[inc.severity] || 'bg-white text-textBody border-border'}`}
+/* ── Closing CTA ───────────────────────────────────────────────────────── */
+
+function ClosingCTA() {
+  return (
+    <Section labelledBy="cta-heading">
+      <Container>
+        <div className="rounded-xl bg-primary-700 px-6 py-12 sm:px-12 sm:py-14">
+          <div className="max-w-prose">
+            <h2 id="cta-heading" className="text-h1 sm:text-display text-ink-invert">
+              Get alerts for the area you live in.
+            </h2>
+            <p className="mt-4 text-body-lg text-primary-100">
+              Send <strong className="font-semibold text-ink-invert">WATCH</strong> and your LGA — for
+              example <strong className="font-semibold text-ink-invert">WATCH Oshodi-Isolo</strong> — to the
+              Siren number on WhatsApp. Send <strong className="font-semibold text-ink-invert">STOP</strong> any
+              time to leave.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <ButtonLink
+                href={waLink('WATCH Oshodi-Isolo')}
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="inverse"
+                size="lg"
               >
-                <span>{TYPE_ICON[inc.incident_type] || '🚨'}</span>
-                <span>{inc.incident_type} · {inc.zone_name || 'Lagos'}</span>
-              </Link>
-            ))}
-            {activeIncidents.length > 6 && (
-              <Link to="/feed" className="shrink-0 text-xs text-primary font-semibold hover:underline">
-                +{activeIncidents.length - 6} more →
-              </Link>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* How it works — ICP focused */}
-      <section className="py-12 px-6 bg-white border-y border-border">
-        <div className="max-w-4xl mx-auto">
-          <h2 className="text-2xl font-bold text-center text-textPrimary mb-2">How Siren protects your family</h2>
-          <p className="text-textBody text-center text-sm mb-10">Save locations once. We do the rest.</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              { step: '1', icon: '📍', title: "Save your family's locations", desc: 'Home, school, work, family compound — add any place you care about. No account needed.' },
-              { step: '2', icon: '🛡️', title: 'We watch for verified threats', desc: 'Our AI filters false reports 24/7. Only confirmed emergencies near your locations trigger an alert.' },
-              { step: '3', icon: '🔔', title: 'You get an instant alert', desc: 'Email or WhatsApp — your choice. Full details: what happened, where, who is responding.' },
-            ].map((item) => (
-              <div key={item.step} className="relative text-center p-6 bg-gray-50 rounded-2xl border border-border">
-                <div className="w-8 h-8 bg-primary text-white rounded-full flex items-center justify-center text-sm font-bold mx-auto mb-4">
-                  {item.step}
-                </div>
-                <div className="text-4xl mb-3">{item.icon}</div>
-                <h3 className="font-semibold text-textPrimary mb-2">{item.title}</h3>
-                <p className="text-textBody text-sm leading-relaxed">{item.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Lagos zones */}
-      <section className="py-12 px-6 max-w-5xl mx-auto">
-        <h2 className="text-xl font-bold mb-5 text-textPrimary">Active Zones</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {ZONES.map((zone) => {
-            const count = activeIncidents.filter(i => i.zone_name?.toLowerCase().includes(zone.toLowerCase())).length
-            // Sum historical from all matching zone stat keys
-            const histCount = Object.entries(zoneStats)
-              .filter(([k]) => k.toLowerCase().includes(zone.toLowerCase()) || zone.toLowerCase().includes(k.toLowerCase()))
-              .reduce((sum, [, v]) => sum + v, 0)
-            return (
-              <Link
-                key={zone}
-                to={`/feed?zone_name=${encodeURIComponent(zone)}`}
-                className="bg-white border border-border rounded-xl p-4 hover:border-primary hover:shadow-sm transition"
+                Subscribe on WhatsApp
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </ButtonLink>
+              <ButtonLink
+                to="/#how-it-works"
+                variant="ghost"
+                size="lg"
+                className="text-primary-100 hover:bg-primary-600 hover:text-ink-invert"
               >
-                <div className="font-semibold text-textPrimary text-sm">{zone}</div>
-                {count > 0
-                  ? <div className="text-xs text-primary font-medium mt-1">{count} active 🔴</div>
-                  : <div className="text-xs text-green-600 mt-1">All clear ✓</div>
-                }
-                {histCount > 0 && (
-                  <div className="text-xs text-gray-400 mt-1">
-                    Documented since 2010: {histCount}
-                  </div>
-                )}
-              </Link>
-            )
-          })}
-        </div>
-      </section>
-
-      {/* Recently resolved + historical entries */}
-      {(resolved.length > 0 || historicalEntries.length > 0) && (
-        <section className="py-8 px-6 max-w-5xl mx-auto">
-          <h2 className="text-xl font-bold mb-5 text-textPrimary">Recently Resolved</h2>
-          <div className="space-y-2.5">
-            {resolved.map((inc) => (
-              <Link
-                key={inc.id}
-                to={`/track/${inc.id}`}
-                className="flex items-center gap-3 bg-white border border-border rounded-xl p-4 hover:border-primary hover:shadow-sm transition"
-              >
-                <span className="text-xl">{TYPE_ICON[inc.incident_type] || '🚨'}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-textPrimary text-sm">{inc.incident_type} — {inc.zone_name}</p>
-                  <p className="text-xs text-textMuted mt-0.5">
-                    {inc.resolved_at ? formatDistanceToNow(new Date(inc.resolved_at), { addSuffix: true }) : ''}
-                    {inc.total_donations_naira > 0 && ` · ₦${inc.total_donations_naira.toLocaleString()} raised`}
-                  </p>
-                </div>
-                <StatusBadge status={inc.status} />
-              </Link>
-            ))}
-
-            {/* Historical entries — grey left border, no donations */}
-            {historicalEntries.map((inc) => (
-              <div
-                key={`h-${inc.id}`}
-                className="flex items-center gap-3 bg-gray-50 rounded-xl p-4"
-                style={{ borderLeft: '3px solid #9CA3AF', border: '1px solid #E5E7EB', borderLeftWidth: '3px', borderLeftColor: '#9CA3AF', borderLeftStyle: 'solid' }}
-              >
-                <span className="text-xl opacity-60">{TYPE_ICON[inc.incident_type] || '🚨'}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-700 text-sm">{inc.incident_type} — {inc.zone_name}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {new Date(inc.created_at).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' })}
-                  </p>
-                </div>
-                <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: '#E5E7EB', color: '#6B7280' }}>
-                  HISTORICAL
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Join CTAs */}
-      <section className="py-14 px-6 bg-white border-t border-border">
-        <div className="max-w-4xl mx-auto">
-          <h2 className="text-2xl font-bold mb-8 text-textPrimary text-center">Want to help respond?</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="border border-border rounded-2xl p-6">
-              <div className="text-3xl mb-3">🩺</div>
-              <h3 className="font-bold text-lg mb-2">Become a Community Responder</h3>
-              <p className="text-textBody text-sm mb-4 leading-relaxed">
-                Nurse, doctor, engineer, or trained in first aid? Register to receive GPS-guided alerts when emergencies happen near you.
-              </p>
-              <Link to="/join" className="block text-center bg-primary text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-red-700 transition">
-                Register as Responder →
-              </Link>
-            </div>
-            <div className="border border-border rounded-2xl p-6">
-              <div className="text-3xl mb-3">🏥</div>
-              <h3 className="font-bold text-lg mb-2">Register Your Organisation</h3>
-              <p className="text-textBody text-sm mb-4 leading-relaxed">
-                Hospitals, ambulance services, fire safety companies — get notified when incidents happen within your service radius.
-              </p>
-              <Link to="/join" className="block text-center bg-primary text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-red-700 transition">
-                Register Organisation →
-              </Link>
+                Read how it works
+              </ButtonLink>
             </div>
           </div>
         </div>
-      </section>
+      </Container>
+    </Section>
+  )
+}
 
-      {/* Footer */}
-      <footer className="bg-gray-900 text-white py-10 px-6">
-        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
-          <div className="flex items-center gap-2 font-bold text-lg">
-            <span>🚨</span> Siren.ng
-          </div>
-          <div className="flex flex-wrap justify-center gap-5 text-gray-400">
-            <Link to="/map" className="hover:text-white transition">Live Map</Link>
-            <Link to="/feed" className="hover:text-white transition">Feed</Link>
-            <Link to="/connect" className="hover:text-white transition">Connect WhatsApp</Link>
-            <Link to="/watch" className="hover:text-white transition">Watch</Link>
-            <Link to="/join" className="hover:text-white transition">Join</Link>
-            <Link to="/login" className="hover:text-white transition">Admin</Link>
-          </div>
-          <p className="text-gray-500 text-xs text-center">For Lagos. By the community.</p>
-        </div>
-      </footer>
+/* ── Page ──────────────────────────────────────────────────────────────── */
+
+export default function HomePage() {
+  return (
+    <div className="min-h-screen bg-canvas">
+      <Nav />
+      <main id="main">
+        <Hero />
+        <Problem />
+        <HowItWorks />
+        <Trust />
+        <LiveIncidents />
+        <ClosingCTA />
+      </main>
+      <Footer />
     </div>
   )
 }

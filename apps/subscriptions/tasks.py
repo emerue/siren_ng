@@ -14,7 +14,7 @@ def notify_location_subscribers(incident_id):
     from apps.incidents.models import Incident
     from apps.subscriptions.models import LGASubscription, LGASubscriptionAlert
     from apps.whatsapp.tasks import send_whatsapp_text
-    from django.db import IntegrityError
+    from django.db import IntegrityError, transaction
 
     try:
         incident = Incident.objects.get(id=incident_id)
@@ -47,25 +47,51 @@ def notify_location_subscribers(incident_id):
         )
         return
 
+    from django.conf import settings
+    from apps.whatsapp.i18n import get_language
+
     incident_type_label = incident.incident_type or "Emergency"
     severity = incident.severity or "UNKNOWN"
-    tracking_url = f"https://sirenng-production.up.railway.app/track/{incident.id}"
+    desc = incident.description[:150]
+    tracking_url = f"{settings.SITE_URL}/track/{incident.id}"
 
-    message = (
-        f"\U0001f6a8 GUARDIAN MODE ALERT\n\n"
-        f"{incident_type_label} in {incident.zone_name}\n"
-        f"Severity: {severity}\n\n"
-        f"{incident.description[:150]}\n\n"
-        f"Track: {tracking_url}\n\n"
-        f"You're receiving this because you subscribed to {lga} alerts.\n"
-        f"Reply STOP to unsubscribe."
-    )
+    # v8 Promise Invariant (§8): state only what Siren did. Verification is
+    # human-confirmed ("Siren coordinator"), never "AI verified" (§5.1.2).
+    def _alert_message(lang):
+        if lang == 'pcm':
+            return (
+                f"\U0001f6a8 SIREN ALERT — {lga}\n\n"
+                f"{incident_type_label} for {incident.zone_name}\n"
+                f"Severity: {severity}\n\n"
+                f"{desc}\n\n"
+                f"Siren coordinator don confirm am. We don alert your neighbours "
+                f"for {lga}, we don tell emergency services.\n\n"
+                f"Follow: {tracking_url}\n\n"
+                f"Na because you subscribe to {lga} alerts you dey see this.\n"
+                f"Reply STOP {lga} to comot."
+            )
+        return (
+            f"\U0001f6a8 SIREN ALERT — {lga}\n\n"
+            f"{incident_type_label} in {incident.zone_name}\n"
+            f"Severity: {severity}\n\n"
+            f"{desc}\n\n"
+            f"Confirmed by a Siren coordinator. Your neighbours in {lga} have been "
+            f"alerted and emergency services notified.\n\n"
+            f"Track: {tracking_url}\n\n"
+            f"You're receiving this because you subscribed to {lga} alerts.\n"
+            f"Reply STOP {lga} to unsubscribe."
+        )
 
     sent = 0
     for sub in subscribers:
-        # Dedup: one alert per subscription+incident
+        # Dedup: one alert per subscription+incident (unique_together).
+        # The create MUST be in its own atomic block: a caught IntegrityError
+        # otherwise poisons the surrounding transaction, so every remaining
+        # subscriber silently fails to be alerted whenever this task runs
+        # inside one (e.g. CELERY_TASK_ALWAYS_EAGER during a request).
         try:
-            LGASubscriptionAlert.objects.create(subscription=sub, incident=incident)
+            with transaction.atomic():
+                LGASubscriptionAlert.objects.create(subscription=sub, incident=incident)
         except IntegrityError:
             continue
 
@@ -78,7 +104,7 @@ def notify_location_subscribers(incident_id):
             phone = f'whatsapp:{phone}'
 
         try:
-            send_whatsapp_text.delay(phone, message)
+            send_whatsapp_text.delay(phone, _alert_message(get_language(phone)))
             sent += 1
         except Exception as e:
             logger.error(

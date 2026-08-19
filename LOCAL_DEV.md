@@ -58,7 +58,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` pins `cbor2<5.5` so this installs cleanly.
+`requirements.txt` pins `cbor2==5.9.0`, which ships a pure-Python wheel — it
+needs no Rust toolchain and carries the current security fixes.
 
 ### Environment
 
@@ -191,7 +192,7 @@ webhook URL (e.g. ngrok).
 | Symptom | Cause / fix |
 |---|---|
 | `No module named 'django'` | venv not activated → `source .venv/bin/activate` |
-| `Failed building wheel for cbor2` | Running Python 3.14 → use 3.13 |
+| `Failed building wheel for cbor2` | Running Python 3.14, or pip chose the sdist → use 3.13 and `pip install --only-binary cbor2 cbor2==5.9.0` |
 | `connection to server on socket /tmp/.s.PGSQL.5432 failed` | `DATABASE_URL` points at Postgres; use `sqlite:///db.sqlite3` locally |
 | `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` | Set `NODE_EXTRA_CA_CERTS` (§2a) |
 | `ERESOLVE could not resolve` on npm install | Use `--legacy-peer-deps` (§2b) |

@@ -147,14 +147,33 @@ if _FRONTEND_DIST.exists():
 
 SITE_URL = config("SITE_URL", default="http://localhost:8000")
 
+# CSRF_TRUSTED_ORIGINS is required by Django 4+ for cross-origin POSTs over
+# HTTPS (admin login behind the Railway proxy). Absent, admin sign-in can fail
+# CSRF validation. Scheme must be included.
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in config(
+        "CSRF_TRUSTED_ORIGINS",
+        default="http://localhost:8000,http://127.0.0.1:8000",
+    ).split(",") if o.strip()
+]
+if _railway_host:
+    CSRF_TRUSTED_ORIGINS.append(f"https://{_railway_host}")
+
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # TLS terminates at the Railway edge; an app-level redirect would loop.
     SECURE_SSL_REDIRECT = False
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    CSRF_COOKIE_SAMESITE = "Lax"
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "same-origin"
+    X_FRAME_OPTIONS = "DENY"
 
 # Supabase Storage — v6
 SUPABASE_URL            = config('SUPABASE_URL', default='')

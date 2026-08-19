@@ -6,6 +6,49 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+# The AI sees attacker-controlled text, so everything it returns is UNTRUSTED
+# INPUT — never a source of authority. We validate it against a strict schema
+# and drop anything unexpected. In particular the model cannot grant itself a
+# privileged outcome: keys like "verified"/"status" are simply not read.
+VALID_INCIDENT_TYPES = {
+    'FIRE', 'FLOOD', 'COLLAPSE', 'RTA', 'EXPLOSION', 'DROWNING', 'HAZARD',
+}
+VALID_SEVERITIES = {'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'}
+MAX_AI_TEXT_FIELD = 120
+
+
+def _clamp_unit(value, default=0.0):
+    """Coerce to a float in [0.0, 1.0]; fall back to `default`."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    if f != f:  # NaN
+        return default
+    return max(0.0, min(1.0, f))
+
+
+def _validate_ai_result(raw) -> dict:
+    """Project raw model output onto a strict, safe schema."""
+    if not isinstance(raw, dict):
+        raise ValueError("AI response was not a JSON object")
+
+    incident_type = str(raw.get('incident_type') or '').strip().upper()
+    severity = str(raw.get('severity') or '').strip().upper()
+    zone = str(raw.get('zone_name') or '').strip()[:MAX_AI_TEXT_FIELD]
+    reason = str(raw.get('rejection_reason') or '').strip()[:MAX_AI_TEXT_FIELD]
+
+    return {
+        'eligible': bool(raw.get('eligible')),
+        'incident_type': incident_type if incident_type in VALID_INCIDENT_TYPES else '',
+        'severity': severity if severity in VALID_SEVERITIES else 'MEDIUM',
+        'ai_confidence': _clamp_unit(raw.get('ai_confidence')),
+        'fraud_score': _clamp_unit(raw.get('fraud_score')),
+        'is_infrastructure': bool(raw.get('is_infrastructure')),
+        'zone_name': zone,
+        'rejection_reason': reason,
+    }
+
 
 def _call_ai(prompt: str) -> dict:
     """
@@ -21,6 +64,7 @@ def _call_ai(prompt: str) -> dict:
             model=settings.GROQ_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
             max_tokens=1024,
+            timeout=30,
         )
         text = completion.choices[0].message.content.strip()
     else:
@@ -29,7 +73,8 @@ def _call_ai(prompt: str) -> dict:
         message = client.messages.create(
             model=settings.ANTHROPIC_MODEL,
             max_tokens=1024,
-            messages=[{'role': 'user', 'content': prompt}]
+            messages=[{'role': 'user', 'content': prompt}],
+            timeout=30,
         )
         text = message.content[0].text.strip()
 
@@ -53,8 +98,8 @@ def verify_incident_ai(self, incident_id: str):
 Analyse this report and respond ONLY with valid JSON. No markdown. No explanation.
 
 --- USER INPUT ---
-Report: {incident.description}
-Location text: {incident.address_text}
+Report: {incident.description[:2000]}
+Location text: {incident.address_text[:300]}
 --- END USER INPUT ---
 
 IMPORTANT CONTEXT:
@@ -116,7 +161,7 @@ CRITICAL RULES FOR zone_name:
 - If no recognisable location is mentioned, return null (not "Lagos")."""
 
     try:
-        result = _call_ai(prompt)
+        result = _validate_ai_result(_call_ai(prompt))
     except Exception as exc:
         raise self.retry(exc=exc)
 
@@ -228,6 +273,39 @@ def _post_verification_actions(incident):
         pass
 
 
+def _is_safe_authority_url(url: str) -> bool:
+    """Guard the operator-configured authority webhook against SSRF.
+
+    The destination is set by an operator via env (never by a user), so this
+    is defence-in-depth against misconfiguration being turned into an
+    internal-network pivot: require https and refuse private, loopback,
+    link-local and cloud-metadata addresses.
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme.lower() != 'https' or not parsed.hostname:
+        logger.error("forward_to_authorities: webhook must be an absolute https URL")
+        return False
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except socket.gaierror:
+        logger.error("forward_to_authorities: webhook host does not resolve")
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast):
+            logger.error("forward_to_authorities: webhook resolves to a non-public address")
+            return False
+    return True
+
+
 @shared_task(bind=True, max_retries=2, default_retry_delay=30)
 def forward_to_authorities(self, incident_id: str):
     """
@@ -275,7 +353,7 @@ def forward_to_authorities(self, incident_id: str):
             logger.error("forward_to_authorities: WhatsApp forward failed for %s: %s",
                          incident_id, exc)
 
-    if webhook:
+    if webhook and _is_safe_authority_url(webhook):
         try:
             import requests
             requests.post(

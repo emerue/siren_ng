@@ -4,10 +4,13 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { format } from 'date-fns'
 import { getMyImpact } from '../api'
 import type { MyImpactData } from '../types'
+import { useWhatsApp } from '../hooks/useWhatsApp'
 
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '+2349000000000'
 
 export default function MyImpactPage() {
+  // Number resolved at runtime (GET /api/config/) — a VITE_ build var
+  // never reaches the Docker frontend stage. See hooks/useWhatsApp.
+  const { number: WHATSAPP_NUMBER } = useWhatsApp()
   const [params] = useSearchParams()
   const phoneHash = params.get('phone_hash') || ''
 

@@ -18,7 +18,7 @@ import Footer from '../components/Footer'
 import { ButtonLink } from '../components/ui/Button'
 import { Container, Section, SectionHeading, Card, Skeleton, EmptyState } from '../components/ui/Primitives'
 import { StatusPill, SeverityTag } from '../components/ui/StatusPill'
-import { waLink } from '../lib/whatsapp'
+import { useWhatsApp } from '../hooks/useWhatsApp'
 import { incidentTypeLabel } from '../lib/incident'
 
 /**
@@ -82,6 +82,8 @@ function HeroVisual() {
 }
 
 function Hero() {
+  const { waLink } = useWhatsApp()
+
   return (
     <section className="border-b border-line bg-surface">
       <Container className="py-14 sm:py-20">
@@ -402,6 +404,8 @@ function LiveIncidents() {
 /* ── Closing CTA ───────────────────────────────────────────────────────── */
 
 function ClosingCTA() {
+  const { waLink } = useWhatsApp()
+
   return (
     <Section labelledBy="cta-heading">
       <Container>

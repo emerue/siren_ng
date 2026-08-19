@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import { useAuthStore } from '../store/authStore'
 import { useFeatures } from '../hooks/useFeatures'
 import { ButtonLink } from './ui/Button'
-import { waLink } from '../lib/whatsapp'
+import { useWhatsApp } from '../hooks/useWhatsApp'
 
 /**
  * Primary navigation.
@@ -27,6 +27,7 @@ export default function Nav() {
   const token = useAuthStore((s) => s.token)
   const [open, setOpen] = useState(false)
   const { isOn } = useFeatures()
+  const { waLink } = useWhatsApp()
   const panelRef = useRef<HTMLDivElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
 

@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { registerResponder, registerOrganisation } from '../api'
+import { useWhatsApp } from '../hooks/useWhatsApp'
 
 delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -12,8 +13,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '+2349000000000'
-const WA = WHATSAPP_NUMBER.replace('+', '')
 
 const SKILL_CATEGORIES = [
   'MEDICAL_ADVANCED',
@@ -461,6 +460,10 @@ function OrgWebForm() {
 }
 
 export default function JoinPage() {
+  // Number resolved at runtime (GET /api/config/) — a VITE_ build var
+  // never reaches the Docker frontend stage. See hooks/useWhatsApp.
+  const { number: WHATSAPP_NUMBER } = useWhatsApp()
+  const WA = WHATSAPP_NUMBER.replace('+', '')
   const [responderChannel, setResponderChannel] = useState<'whatsapp' | 'web'>('whatsapp')
   const [orgChannel, setOrgChannel] = useState<'whatsapp' | 'web'>('whatsapp')
 

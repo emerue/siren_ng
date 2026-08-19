@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Siren as SirenIcon } from 'lucide-react'
-import { waLink, WHATSAPP_DISPLAY } from '../lib/whatsapp'
+import { useWhatsApp } from '../hooks/useWhatsApp'
 
 /**
  * Footer. Minimal and honest — it restates the promise boundary (§8) rather
@@ -8,6 +8,8 @@ import { waLink, WHATSAPP_DISPLAY } from '../lib/whatsapp'
  * advertised here.
  */
 export default function Footer() {
+  const { waLink, number } = useWhatsApp()
+
   return (
     <footer className="border-t border-line bg-surface">
       <div className="mx-auto max-w-content px-5 py-12 sm:px-6">
@@ -26,7 +28,7 @@ export default function Footer() {
               rel="noopener noreferrer"
               className="mt-4 inline-block text-caption font-semibold text-primary-700 hover:underline"
             >
-              WhatsApp {WHATSAPP_DISPLAY}
+              WhatsApp {number}
             </a>
           </div>
 

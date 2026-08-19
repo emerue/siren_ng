@@ -15,6 +15,10 @@ api.interceptors.request.use((config) => {
 export const getFeatures = (): Promise<Record<string, boolean>> =>
   api.get('/api/features/').then((r) => r.data.features ?? {})
 
+// Runtime site config (WhatsApp number, site URL) — see hooks/useWhatsApp.
+export const getSiteConfig = (): Promise<{ whatsapp_number: string; site_url: string }> =>
+  api.get('/api/config/').then((r) => r.data)
+
 // ── Incidents ─────────────────────────────────────────────────────────────────
 export const getActiveIncidents = () =>
   api.get('/api/incidents/active/').then((r) => r.data)

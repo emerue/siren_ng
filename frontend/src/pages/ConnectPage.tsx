@@ -1,8 +1,7 @@
 import Nav from '../components/Nav'
 import { Link } from 'react-router-dom'
+import { useWhatsApp } from '../hooks/useWhatsApp'
 
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '+2349000000000'
-const WA = WHATSAPP_NUMBER.replace('+', '')
 
 const COMMANDS = [
   { cmd: 'CONNECT',      desc: 'First-time setup and NDPR consent' },
@@ -39,6 +38,10 @@ const PRIVACY = [
 ]
 
 export default function ConnectPage() {
+  // Number resolved at runtime (GET /api/config/) — a VITE_ build var
+  // never reaches the Docker frontend stage. See hooks/useWhatsApp.
+  const { number: WHATSAPP_NUMBER } = useWhatsApp()
+  const WA = WHATSAPP_NUMBER.replace('+', '')
   return (
     <div className="min-h-screen bg-bg font-sans">
       <Nav />

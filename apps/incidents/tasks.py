@@ -235,24 +235,33 @@ def _post_verification_actions(incident):
             incident.id, exc,
         )
 
+    # NOTE: each fan-out is isolated so one failure cannot cancel the others,
+    # but failures are LOGGED AS ERRORS, never swallowed. A silently dropped
+    # neighbour alert is an outright product failure for an emergency service
+    # (BRD §9: alert delivery is a tracked pilot metric).
     try:
         from apps.responders.tasks import notify_nearest_responders
         if incident.severity in ['CRITICAL', 'HIGH', 'MEDIUM']:
             notify_nearest_responders.delay(str(incident.id))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("_post_verification_actions: responder notify failed for %s: %s",
+                     incident.id, exc, exc_info=True)
 
     try:
         from apps.organisations.tasks import notify_nearest_organisations
         notify_nearest_organisations.delay(str(incident.id))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.error("_post_verification_actions: organisation notify failed for %s: %s",
+                     incident.id, exc, exc_info=True)
 
     try:
         from apps.subscriptions.tasks import notify_location_subscribers
         notify_location_subscribers.delay(str(incident.id))
-    except Exception:
-        pass
+    except Exception as exc:
+        # This is the core-loop alert. If it fails, neighbours are NOT told.
+        logger.critical(
+            "_post_verification_actions: LGA SUBSCRIBER ALERT FAILED for %s: %s",
+            incident.id, exc, exc_info=True)
 
     # v8: Notify authorities. Every human-verified incident is forwarded to
     # LASEMA / official channels as a best-effort notification (§5.1.4, §5.4).

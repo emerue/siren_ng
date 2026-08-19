@@ -69,13 +69,30 @@ _DATABASE_URL = config("DATABASE_URL")
 # backend. Local dev may point DATABASE_URL at sqlite:/// to run with no DB
 # server; in that case let dj-database-url infer the sqlite engine.
 _DB_IS_POSTGRES = _DATABASE_URL.startswith(("postgres://", "postgresql://"))
+
+# Supabase transaction pooler (port 6543) is pgbouncer in TRANSACTION mode.
+# A connection is handed back to the pool after every statement, so Django must
+# not hold persistent connections and must not use server-side cursors —
+# otherwise you get "prepared statement already exists" and vanishing cursors
+# under load. Session-mode/direct connections keep persistent connections.
+_DB_VIA_TRANSACTION_POOLER = _DB_IS_POSTGRES and ":6543" in _DATABASE_URL
+
 DATABASES = {
     "default": dj_database_url.parse(
         _DATABASE_URL,
-        conn_max_age=600,
+        conn_max_age=0 if _DB_VIA_TRANSACTION_POOLER else 600,
         **({"engine": "django.db.backends.postgresql"} if _DB_IS_POSTGRES else {}),
     )
 }
+
+if _DB_VIA_TRANSACTION_POOLER:
+    DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
+    # psycopg3 pipelines prepared statements by default; pgbouncer cannot.
+    DATABASES["default"].setdefault("OPTIONS", {})["prepare_threshold"] = None
+
+# Fail fast rather than hanging a worker on an unreachable database.
+if _DB_IS_POSTGRES:
+    DATABASES["default"].setdefault("OPTIONS", {})["connect_timeout"] = 10
 
 _REDIS_URL = config("REDIS_URL", default="")
 

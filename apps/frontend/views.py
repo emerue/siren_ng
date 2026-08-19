@@ -4,6 +4,34 @@ from pathlib import Path
 from django.conf import settings
 
 
+def health(request):
+    """Liveness + dependency check for Railway health checks and on-call.
+
+    Returns 200 only when the database is actually reachable. The outage that
+    hid for days looked like a healthy deploy because the container started
+    fine while every DB query failed; a health check that touches the database
+    surfaces that immediately.
+    """
+    from django.db import connection
+
+    checks = {}
+    ok = True
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        checks["database"] = "ok"
+    except Exception as exc:
+        # Class name only — never leak credentials or the DSN.
+        checks["database"] = f"error: {type(exc).__name__}"
+        ok = False
+
+    return JsonResponse(
+        {"status": "ok" if ok else "degraded", "checks": checks},
+        status=200 if ok else 503,
+    )
+
+
 def site_config(request):
     """Public, non-secret runtime configuration for the web client.
 

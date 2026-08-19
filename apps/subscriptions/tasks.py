@@ -85,6 +85,11 @@ def notify_location_subscribers(incident_id):
     # BRD §5.1.3: LGA alerts are business-initiated, so they need an approved
     # template. Without one, delivery only works for subscribers who happen to
     # have messaged us in the last 24h — i.e. almost nobody during a pilot.
+    # {{4}} of the approved template is a free-text detail line. Meta rejects
+    # newlines and tabs inside template variables, so it must be a single line,
+    # and it is length-capped to stay well inside the parameter limit.
+    detail_line = " ".join(f"{desc} Track: {tracking_url}".split())[:600]
+
     template_sid = getattr(settings, 'TWILIO_TEMPLATE_ZONE_ALERT', '')
     if not template_sid:
         logger.warning(
@@ -119,13 +124,16 @@ def notify_location_subscribers(incident_id):
             if template_sid:
                 # Business-initiated: must be an approved template or Meta
                 # rejects it for anyone outside the 24h service window.
-                # Template placeholders: {{1}} type, {{2}} LGA, {{3}} severity,
-                # {{4}} tracking URL.
+                #
+                # Mapping is dictated by the APPROVED template body:
+                #   "Siren NG update: A {{1}} incident has been verified in
+                #    {{2}}.  Severity: {{3}}.  {{4}}  Reply STOP to unsubscribe."
+                # so {{4}} is the human-readable detail line — NOT the URL.
                 send_whatsapp_template.delay(phone, template_sid, {
                     "1": incident_type_label,
                     "2": lga,
                     "3": severity,
-                    "4": tracking_url,
+                    "4": detail_line,
                 })
             else:
                 send_whatsapp_text.delay(phone, _alert_message(get_language(phone)))

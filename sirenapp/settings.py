@@ -245,6 +245,14 @@ FEATURES = {
 # Backward-compatible alias (referenced in apps/incidents/tasks.py).
 ENABLE_COMMUTE_SHIELD = FEATURES["commute_shield"]
 
+# BRD §5.1.3 — LGA alerts are BUSINESS-INITIATED messages. WhatsApp only
+# permits free-form text inside the 24h customer-service window, so an alert to
+# someone who subscribed days ago MUST be sent as an approved template or Meta
+# rejects it. Holds the Content SID (HX...) from Twilio's Content Template
+# Builder. If unset, delivery falls back to free-form and is logged as a
+# warning — fine for testing, not for the pilot.
+TWILIO_TEMPLATE_ZONE_ALERT = config("TWILIO_TEMPLATE_ZONE_ALERT", default="")
+
 TWILIO_ACCOUNT_SID     = config("TWILIO_ACCOUNT_SID", default="")
 TWILIO_AUTH_TOKEN      = config("TWILIO_AUTH_TOKEN", default="")
 TWILIO_WHATSAPP_NUMBER = config("TWILIO_WHATSAPP_NUMBER", default="")

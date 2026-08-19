@@ -38,6 +38,39 @@ def send_whatsapp_text(to_number, message):
 
 
 @shared_task
+def send_whatsapp_template(to_number, content_sid, variables=None):
+    """Send an approved WhatsApp template (business-initiated).
+
+    Required for any message sent OUTSIDE the 24h customer-service window —
+    which is every LGA alert, since subscribers typically subscribed days
+    earlier. Free-form text in that situation is rejected by Meta.
+
+    `variables` maps the template's numbered placeholders, e.g. {"1": "Fire"}.
+    """
+    import json as _json
+    try:
+        from twilio.rest import Client
+
+        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        to_whatsapp = (
+            to_number if str(to_number).startswith('whatsapp:')
+            else f'whatsapp:{to_number}'
+        )
+        msg = client.messages.create(
+            from_=settings.TWILIO_WHATSAPP_NUMBER,
+            to=to_whatsapp,
+            content_sid=content_sid,
+            content_variables=_json.dumps(variables or {}),
+        )
+        logger.info(
+            "send_whatsapp_template: sent to %s (sid=%s) status %s",
+            to_whatsapp, content_sid, getattr(msg, 'status', 'unknown'),
+        )
+    except Exception as exc:
+        logger.error("send_whatsapp_template failed to %s: %s", to_number, exc)
+
+
+@shared_task
 def notify_reporter_verified(incident_id):
     from apps.incidents.models import Incident
     from apps.whatsapp import templates as tmpl

@@ -207,7 +207,10 @@ ANTHROPIC_MODEL   = config("ANTHROPIC_MODEL", default="claude-sonnet-4-6")
 # AI provider: "anthropic" or "groq"
 AI_PROVIDER = config("AI_PROVIDER", default="groq")
 GROQ_API_KEY = config("GROQ_API_KEY", default="")
-GROQ_MODEL   = config("GROQ_MODEL", default="llama-3.3-70b-versatile")
+# NOTE: Groq retires models. llama-3.3-70b-versatile was removed and every
+# classification call began returning 404 model_not_found, so incidents piled
+# up unclassified in DETECTED. Verify with `manage.py check_ai` after changing.
+GROQ_MODEL   = config("GROQ_MODEL", default="openai/gpt-oss-120b")
 
 # v8 §5.1.4 — Best-effort authority (LASEMA/official) notification on VERIFIED.
 # Both optional; if neither is set the forward intent is still logged for audit.

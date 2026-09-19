@@ -5,8 +5,12 @@ Idempotent and self-healing: permissions are `set()`, not `add()`, so re-running
 after someone hand-added `delete_incident` in the admin UI removes it again.
 
     python manage.py setup_coordinator_group
-    python manage.py setup_coordinator_group --user ada --user musa
+    python manage.py setup_coordinator_group --create ada      # new volunteer
+    python manage.py setup_coordinator_group --user musa       # existing account
     python manage.py setup_coordinator_group --dry-run
+
+Never use `createsuperuser` for a coordinator: is_coordinator() excludes
+superusers, so such an account would get the normal admin, not the console.
 """
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
@@ -33,6 +37,12 @@ class Command(BaseCommand):
         parser.add_argument(
             "--user", action="append", default=[], dest="users",
             help="Username to make a coordinator. Repeatable.",
+        )
+        parser.add_argument(
+            "--create", action="append", default=[], dest="create",
+            help="Create this username as a coordinator if it does not exist. "
+                 "The account starts with no usable password — set one with "
+                 "`manage.py changepassword <username>`. Repeatable.",
         )
         parser.add_argument(
             "--dry-run", action="store_true",
@@ -76,6 +86,26 @@ class Command(BaseCommand):
             self.stdout.write("  permissions already correct")
 
         User = get_user_model()
+
+        # --create: make the account first, then fall through to the same
+        # promotion path below. Never a superuser: is_coordinator() excludes
+        # them, so a superuser in this group would silently get nothing.
+        for username in options["create"]:
+            user, made = User.objects.get_or_create(
+                username=username,
+                defaults={"is_staff": True, "is_superuser": False},
+            )
+            if made:
+                # No usable password: the operator sets one via changepassword,
+                # so it never lands in shell history.
+                user.set_unusable_password()
+                user.save(update_fields=["password"])
+                self.stdout.write(self.style.SUCCESS(f"  created user {username}"))
+            else:
+                self.stdout.write(f"  {username} already exists")
+            if username not in options["users"]:
+                options["users"].append(username)
+
         for username in options["users"]:
             try:
                 user = User.objects.get(username=username)

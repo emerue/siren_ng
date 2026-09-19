@@ -1,0 +1,41 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{# The interstitial. Reaching this page broadcasts nothing; only the POST below
+   does. That separation is what makes "a GET must never broadcast" true. #}
+
+{% block extrastyle %}{{ block.super }}
+  <link rel="stylesheet" href="{% static 'siren_admin/coordinator.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="siren-confirm">
+  <h1>Confirm this report?</h1>
+
+  <div class="siren-confirm__incident">
+    <span class="siren-pill siren-pill--{{ incident.severity|lower }}">{{ incident.severity }}</span>
+    <strong>{{ incident.incident_type|default:"Unclassified" }}</strong>
+    <span class="siren-muted">· {{ incident.zone_name|default:"area unknown" }}</span>
+    <blockquote class="siren-quote">{{ incident.description }}</blockquote>
+  </div>
+
+  <p class="siren-confirm__consequence">
+    This will alert <strong>every Siren subscriber in {{ lga }}</strong> and notify
+    emergency services. Messages cannot be recalled once sent.
+  </p>
+
+  <p class="siren-muted">
+    Only confirm if you believe this is a real emergency. If you are unsure, go back
+    and ask the reporter for more detail first.
+  </p>
+
+  <form method="post" class="siren-confirm__actions">
+    {% csrf_token %}
+    <button type="submit" class="siren-btn siren-btn--primary">
+      Yes — confirm and alert {{ lga }}
+    </button>
+    <a class="siren-btn siren-btn--quiet"
+       href="{% url 'admin:incidents_incident_change' incident.pk %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

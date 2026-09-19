@@ -165,8 +165,12 @@ class HumanVerificationGateTests(TestCase):
 
         incident = make_incident(status="DETECTED")
         admin = IncidentAdmin(Incident, AdminSite())
+        # The fan-out is deferred to transaction commit so a Celery worker can
+        # never read the row before it lands. TestCase wraps everything in a
+        # transaction that never commits, so run the callbacks explicitly.
         with patch("apps.incidents.tasks._post_verification_actions") as broadcast:
-            admin.mark_verified(None, Incident.objects.filter(pk=incident.pk))
+            with self.captureOnCommitCallbacks(execute=True):
+                admin.mark_verified(None, Incident.objects.filter(pk=incident.pk))
         incident.refresh_from_db()
         self.assertEqual(incident.status, "VERIFIED")
         self.assertEqual(broadcast.call_count, 1)

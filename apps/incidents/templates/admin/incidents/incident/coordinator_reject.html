@@ -1,0 +1,42 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{# Rejection reasons come from a fixed <select>. There is deliberately no
+   free-text field anywhere on this page: nothing a coordinator types can reach
+   a reporter (promise invariant, BRD §8). #}
+
+{% block extrastyle %}{{ block.super }}
+  <link rel="stylesheet" href="{% static 'siren_admin/coordinator.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="siren-confirm">
+  <h1>Reject this report?</h1>
+
+  <div class="siren-confirm__incident">
+    <strong>{{ incident.incident_type|default:"Unclassified" }}</strong>
+    <span class="siren-muted">· {{ incident.zone_name|default:"area unknown" }}</span>
+    <blockquote class="siren-quote">{{ incident.description }}</blockquote>
+  </div>
+
+  <p class="siren-muted">
+    The reporter will be told their report could not be verified as an emergency.
+    No alert is sent to anyone else.
+  </p>
+
+  <form method="post" class="siren-confirm__actions">
+    {% csrf_token %}
+    <label for="reason"><strong>Why?</strong></label>
+    <select name="reason" id="reason" class="siren-select" required>
+      <option value="">Choose a reason…</option>
+      {% for code, label in rejection_reasons %}
+        <option value="{{ code }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <button type="submit" class="siren-btn siren-btn--danger">Reject report</button>
+    <a class="siren-btn siren-btn--quiet"
+       href="{% url 'admin:incidents_incident_change' incident.pk %}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

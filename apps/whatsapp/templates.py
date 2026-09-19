@@ -21,6 +21,47 @@ def received_ack(lang='en'):
     )
 
 
+def received_ack_out_of_hours(lang='en'):
+    """Acknowledgment sent outside coordinator coverage hours.
+
+    Honest by design (BRD §7): a report arriving at 02:00 is queued, not being
+    read this second, and saying otherwise would be the same class of
+    over-promise the promise invariant exists to prevent.
+    """
+    if lang == 'pcm':
+        return (
+            "We don receive your report.\n\n"
+            "Coordinator no dey online right now — dem go check am and confirm "
+            "when dem resume. Your report no go loss.\n\n"
+            "If e be life-and-death, call 767 or 112 now now."
+        )
+    return (
+        "Received — your report is in the queue.\n\n"
+        "A coordinator is not online right now. They will confirm it when "
+        "coverage resumes. Your report is not lost.\n\n"
+        "If this is life-threatening, call 767 or 112 now."
+    )
+
+
+def coordinator_more_info(lang='en'):
+    """Fixed request for more detail, sent by a coordinator from the admin.
+
+    Deliberately a template with no interpolation: a coordinator can never type
+    free text that reaches a reporter.
+    """
+    if lang == 'pcm':
+        return (
+            "Siren coordinator dey look your report.\n\n"
+            "Abeg send the street name or the closest landmark, and wetin you "
+            "dey see now. Photo go help well well."
+        )
+    return (
+        "A Siren coordinator is reviewing your report.\n\n"
+        "Please send the street name or nearest landmark, and what you can see "
+        "now. A photo helps."
+    )
+
+
 def language_switch_hint():
     """Bilingual one-liner appended to the first-contact ack."""
     return "Reply PIDGIN for Pidgin • ENGLISH for English"

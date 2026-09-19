@@ -100,7 +100,10 @@ class MvpCoreLoopTests(TestCase):
 
             # ── 3. Coordinator confirms in the admin ──────────────────────
             admin = IncidentAdmin(Incident, AdminSite())
-            admin.mark_verified(None, Incident.objects.filter(pk=incident.pk))
+            # Fan-out is deferred to commit (so a worker cannot read the row
+            # pre-commit); TestCase never commits, so execute the callbacks.
+            with self.captureOnCommitCallbacks(execute=True):
+                admin.mark_verified(None, Incident.objects.filter(pk=incident.pk))
 
             incident.refresh_from_db()
             self.assertIn(incident.status, ("VERIFIED", "AGENCY_NOTIFIED"))

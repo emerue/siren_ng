@@ -1,0 +1,30 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+
+{% block extrastyle %}{{ block.super }}
+  {% if is_coordinator %}<link rel="stylesheet" href="{% static 'siren_admin/coordinator.css' %}">{% endif %}
+{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+  {% if is_coordinator %}
+    <script src="{% static 'siren_admin/queue.js' %}" defer
+            data-refresh-seconds="{{ refresh_seconds }}"></script>
+  {% endif %}
+{% endblock %}
+
+{% block object-tools %}
+  {% if is_coordinator %}
+    <div class="siren-queuebar">
+      <p class="siren-queuebar__hint">
+        Oldest first. Target: confirm or reject within {{ sla_minutes }} minutes.
+      </p>
+      {# `all` is Django's built-in ALL_VAR and is ignored by the filter
+         validator, so it clears the default DETECTED filter without tripping
+         IncorrectLookupParameters. #}
+      <a class="siren-btn siren-btn--quiet" href="?all=">Show every status</a>
+      <span class="siren-queuebar__refresh" data-refresh-label>Refreshing shortly…</span>
+    </div>
+  {% else %}
+    {{ block.super }}
+  {% endif %}
+{% endblock %}

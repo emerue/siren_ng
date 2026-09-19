@@ -217,6 +217,18 @@ GROQ_MODEL   = config("GROQ_MODEL", default="openai/gpt-oss-120b")
 LASEMA_FORWARD_NUMBERS = config("LASEMA_FORWARD_NUMBERS", default="")  # comma-separated whatsapp:+234...
 LASEMA_FORWARD_WEBHOOK = config("LASEMA_FORWARD_WEBHOOK", default="")  # URL accepting a JSON POST
 
+# ── Coordinator console ──────────────────────────────────────
+# Hours a coordinator is actually on duty (Africa/Lagos). Outside them the
+# inbound acknowledgment tells the reporter the truth: queued, not being read
+# this second.
+COORDINATOR_COVERAGE_START = config("COORDINATOR_COVERAGE_START", default="07:00")
+COORDINATOR_COVERAGE_END   = config("COORDINATOR_COVERAGE_END",   default="21:00")
+# Verification SLA (BRD §7): drives the queue's age colour-coding.
+COORDINATOR_SLA_MINUTES        = config("COORDINATOR_SLA_MINUTES",        default=10, cast=int)
+COORDINATOR_ESCALATION_MINUTES = config("COORDINATOR_ESCALATION_MINUTES", default=30, cast=int)
+# Comma-separated WhatsApp numbers for the second coordinator. Empty = log only.
+COORDINATOR_ESCALATION_NUMBERS = config("COORDINATOR_ESCALATION_NUMBERS", default="")
+
 # ── v8 FEATURE FLAGS ─────────────────────────────────────────
 # One switch per feature. Flip in the environment (Railway → Variables) to
 # release a feature to production — no code change, just a service restart.
@@ -236,6 +248,10 @@ FEATURES = {
     "guardian_web":   config("FEATURE_GUARDIAN_WEB",   default=False, cast=bool),
     "my_impact":      config("FEATURE_MY_IMPACT",      default=False, cast=bool),
     "media_gallery":  config("FEATURE_MEDIA_GALLERY",  default=False, cast=bool),
+    # Inbound reporter replies (SAFE/HELP) are not captured anywhere yet.
+    # Off until storage exists; the coordinator UI says so honestly rather
+    # than showing a misleading empty list.
+    "reporter_reply_capture": config("FEATURE_REPORTER_REPLY_CAPTURE", default=False, cast=bool),
 
     # OUT — archived in v7.3, off unless explicitly re-enabled (§5.3)
     "commute_shield":     config("ENABLE_COMMUTE_SHIELD",       default=False, cast=bool),
@@ -310,6 +326,11 @@ CELERY_BEAT_SCHEDULE = {
     "evening-commute-briefing": {
         "task": "apps.subscriptions.tasks.send_commute_briefing",
         "schedule": crontab(hour=16, minute=30),
+    },
+    # Flags reports left unconfirmed past the SLA during covered hours.
+    "coordinator-sla-escalation": {
+        "task": "apps.incidents.tasks.check_coordinator_sla",
+        "schedule": crontab(minute="*/5"),
     },
     "verifying-escalation": {
         "task": "apps.incidents.tasks.check_verifying_escalation",

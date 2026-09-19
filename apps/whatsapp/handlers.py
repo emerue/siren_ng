@@ -156,7 +156,11 @@ def create_incident_from_message(from_number, body, media_urls, location):
         from apps.whatsapp.tasks import process_whatsapp_media
         process_whatsapp_media.delay(str(incident.id), media_urls)
     from apps.whatsapp.i18n import get_language, has_language_preference
-    ack = tmpl.received_ack(get_language(from_number))
+    from utils.coverage import is_within_coverage
+    # Outside coverage hours, say so plainly rather than implying someone is
+    # reading it right now (BRD §7 verification SLA).
+    _lang = get_language(from_number)
+    ack = tmpl.received_ack(_lang) if is_within_coverage() else tmpl.received_ack_out_of_hours(_lang)
     # First contact: append the bilingual language-switch hint so the sender
     # learns they can choose Pidgin/English (v8 §7).
     if not has_language_preference(from_number):

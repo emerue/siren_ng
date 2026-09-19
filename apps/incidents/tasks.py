@@ -417,6 +417,70 @@ def _notify_verifying(incident):
 
 
 @shared_task
+def check_coordinator_sla():
+    """Flag reports left unconfirmed past the escalation window during covered hours.
+
+    Never verifies or broadcasts anything — the human-confirm gate (§8) is
+    absolute. This only raises a hand so a person looks.
+
+    Dedupes on a marker ResponseLog rather than a new model field, so each
+    incident is flagged exactly once and the flag is visible in the same
+    timeline the coordinator already reads.
+    """
+    from datetime import timedelta
+    from django.conf import settings
+    from django.utils import timezone
+    from apps.incidents.models import Incident, ResponseLog
+    from apps.incidents.coordinator import SLA_NOTE_PREFIX
+    from utils.coverage import is_within_coverage
+
+    if not is_within_coverage():
+        return  # nobody is on duty; flagging would be noise
+
+    minutes = getattr(settings, 'COORDINATOR_ESCALATION_MINUTES', 30)
+    cutoff = timezone.now() - timedelta(minutes=minutes)
+    stale = list(Incident.objects.filter(status='DETECTED', created_at__lt=cutoff))
+    if not stale:
+        return
+
+    already = set(
+        ResponseLog.objects
+        .filter(incident__in=stale, actor='system', note__startswith=SLA_NOTE_PREFIX)
+        .values_list('incident_id', flat=True)
+    )
+
+    numbers = [n.strip() for n in
+               getattr(settings, 'COORDINATOR_ESCALATION_NUMBERS', '').split(',') if n.strip()]
+
+    for incident in stale:
+        if incident.id in already:
+            continue
+        note = (f"{SLA_NOTE_PREFIX}unconfirmed for {minutes}m during covered hours.")
+        ResponseLog.objects.create(
+            incident=incident, from_status=incident.status,
+            to_status=incident.status, actor='system', note=note,
+        )
+        logger.warning("coordinator SLA breach: incident %s waiting %sm",
+                       incident.id, minutes)
+        if not numbers:
+            continue
+        try:
+            from apps.whatsapp.tasks import send_whatsapp_text
+            text = (
+                f"Siren: a report has been waiting {minutes} minutes without a "
+                f"coordinator decision.\n\n"
+                f"{incident.incident_type or 'Unclassified'} · "
+                f"{incident.zone_name or 'area unknown'}\n"
+                f"Ref: {incident.id}"
+            )
+            for number in numbers:
+                send_whatsapp_text.delay(number, text)
+        except Exception as exc:
+            logger.error("coordinator SLA escalation send failed for %s: %s",
+                         incident.id, exc)
+
+
+@shared_task
 def check_verifying_escalation():
     """
     Runs every 5 minutes. Escalates VERIFYING incidents that have enough vouches

@@ -43,6 +43,11 @@ class Incident(models.Model):
 
     incident_type = models.CharField(max_length=20, choices=IncidentType.choices, blank=True)
     description   = models.TextField()
+    # Internal triage notes. Never sent to the reporter or a subscriber.
+    coordinator_note = models.TextField(
+        blank=True, default="",
+        help_text="Internal. Never sent to the reporter.",
+    )
     severity      = models.CharField(max_length=10, choices=IncidentSeverity.choices,
                       default='MEDIUM')
     status        = models.CharField(max_length=20, choices=IncidentStatus.choices,
@@ -93,6 +98,9 @@ class Incident(models.Model):
             models.Index(fields=['lga', 'status']),
             models.Index(fields=['is_historical', 'status']),
             models.Index(fields=['date_occurred']),
+            # Serves the coordinator queue (status=DETECTED ordered by created_at)
+            # and the SLA sweep. None of the indexes above cover that pair.
+            models.Index(fields=['status', 'created_at']),
         ]
 
     @property

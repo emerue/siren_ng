@@ -19,3 +19,10 @@ urlpatterns = [
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('', include('apps.frontend.urls')),
 ]
+
+# Coordinators live in this admin; name it for them. Global, so superusers see
+# it too — accepted as cosmetic (overriding admin/base_site.html does not work
+# here because contrib.admin precedes apps.incidents in INSTALLED_APPS).
+admin.site.site_header = "Siren — Coordinator Console"
+admin.site.site_title = "Siren Coordinator"
+admin.site.index_title = "Incident queue"

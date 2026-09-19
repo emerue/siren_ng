@@ -1,0 +1,140 @@
+{% extends "admin/change_form.html" %}
+{% load static %}
+
+{# Coordinator verification screen.
+   Every block is gated on `is_coordinator`, so a superuser renders the stock
+   admin page unchanged (each block resolves to block.super). #}
+
+{% block extrastyle %}{{ block.super }}
+  {% if is_coordinator %}<link rel="stylesheet" href="{% static 'siren_admin/coordinator.css' %}">{% endif %}
+{% endblock %}
+
+{% block object-tools %}
+  {% if is_coordinator and incident %}
+    <div class="siren-actions">
+      {# Confirm links to an interstitial (GET). Broadcasting only ever happens
+         on the POST from that page, never from a link. #}
+      {% if can_confirm %}
+        <a class="siren-btn siren-btn--primary"
+           href="{% url 'admin:incidents_incident_coordinator_confirm' incident.pk %}">
+          Confirm &amp; alert
+        </a>
+      {% else %}
+        <span class="siren-btn siren-btn--disabled"
+              title="Only a report still awaiting review can be confirmed.">
+          Confirm &amp; alert
+        </span>
+      {% endif %}
+
+      {% if can_request_info %}
+        <form method="post" class="siren-actions__form"
+              action="{% url 'admin:incidents_incident_coordinator_request_info' incident.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="siren-btn siren-btn--quiet">Ask for more detail</button>
+        </form>
+      {% else %}
+        <span class="siren-btn siren-btn--disabled"
+              title="{% if not within_service_window %}Outside the 24-hour WhatsApp window — the reporter can no longer be messaged.{% else %}Not available for this report.{% endif %}">
+          Ask for more detail
+        </span>
+      {% endif %}
+
+      {% if can_resolve %}
+        <form method="post" class="siren-actions__form"
+              action="{% url 'admin:incidents_incident_coordinator_resolve' incident.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="siren-btn siren-btn--quiet">Mark resolved</button>
+        </form>
+      {% endif %}
+
+      {% if can_reject %}
+        <a class="siren-btn siren-btn--danger"
+           href="{% url 'admin:incidents_incident_coordinator_reject' incident.pk %}">
+          Reject
+        </a>
+      {% endif %}
+    </div>
+    {% if not can_confirm and not can_reject %}
+      <p class="siren-note">This report is <strong>{{ incident.status }}</strong>. It is no longer awaiting a decision.</p>
+    {% endif %}
+  {% else %}
+    {{ block.super }}
+  {% endif %}
+{% endblock %}
+
+{% block field_sets %}
+  {% if is_coordinator and incident %}
+    <div class="siren-report">
+      <div class="siren-report__head">
+        <span class="siren-pill siren-pill--{{ incident.severity|lower }}">{{ incident.severity }}</span>
+        <h2>{{ incident.incident_type|default:"Unclassified" }}</h2>
+        <p class="siren-report__meta">
+          {{ incident.zone_name|default:"Area unknown" }} · reported {{ incident.created_at|timesince }} ago
+        </p>
+      </div>
+
+      <div class="siren-report__body">
+        <h3>What was reported</h3>
+        <blockquote class="siren-quote">{{ incident.description }}</blockquote>
+      </div>
+
+      {% if media_items %}
+        <div class="siren-report__media">
+          <h3>Photos &amp; video ({{ media_items|length }})</h3>
+          <div class="siren-thumbs">
+            {% for item in media_items %}
+              <a href="{{ item.public_url }}" target="_blank" rel="noopener noreferrer" class="siren-thumb">
+                {% if item.media_type == "image" %}
+                  <img src="{{ item.public_url }}" alt="Attachment from the reporter" loading="lazy">
+                {% else %}
+                  <span class="siren-thumb__file">▶ {{ item.media_type }}</span>
+                {% endif %}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}
+
+{% block after_related_objects %}
+  {{ block.super }}
+  {% if is_coordinator and incident %}
+    <div class="siren-panel">
+      <h3>Reporter replies</h3>
+      {% if reply_capture_enabled %}
+        {# Storage exists; render the captured replies. #}
+        <ul class="siren-replies">
+          {% for reply in reporter_replies %}
+            <li><strong>{{ reply.keyword }}</strong> · {{ reply.received_at|timesince }} ago</li>
+          {% empty %}
+            <li class="siren-muted">No replies from the reporter yet.</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="siren-warn">
+          Reporter replies are <strong>not captured yet</strong>. SAFE and HELP responses
+          to this incident are not recorded anywhere. Do not read the absence of a reply
+          as a signal that the reporter is safe.
+        </p>
+      {% endif %}
+    </div>
+
+    <div class="siren-panel">
+      <h3>What has happened so far</h3>
+      <ol class="siren-timeline">
+        {% for entry in timeline %}
+          <li>
+            <span class="siren-timeline__status">{{ entry.to_status }}</span>
+            <span class="siren-timeline__meta">{{ entry.created_at|timesince }} ago · {{ entry.actor }}</span>
+            {% if entry.note %}<p class="siren-timeline__note">{{ entry.note }}</p>{% endif %}
+          </li>
+        {% empty %}
+          <li class="siren-muted">Nothing recorded yet.</li>
+        {% endfor %}
+      </ol>
+    </div>
+  {% endif %}
+{% endblock %}

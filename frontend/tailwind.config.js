@@ -70,6 +70,17 @@ export default {
         info:     '#1D4ED8',
 
         // ── Surfaces & text ─────────────────────────────────────────────────
+        /**
+         * The institution's voice. Deeper and bluer than primary-700 so the hero
+         * and footer read as Siren speaking, with the body of the page left as
+         * plain record. A real blue, not a tinted near-black.
+         */
+        night:    '#121B2E',
+        // Fill for words quoted from someone else — inbound message bubbles.
+        wash:     '#EDF0F5',
+        // Human confirmation, and nothing else. The page's only accent.
+        confirm:  '#0F766E',
+
         canvas:   '#F7F8FA', // page background
         surface:  '#FFFFFF', // cards / panels
         sunken:   '#F1F3F7', // wells, subtle grouping
@@ -104,7 +115,13 @@ export default {
       },
 
       fontFamily: {
-        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        sans: ['Archivo', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        /**
+         * Literal WhatsApp commands only — WATCH, STOP, and the LGA that follows
+         * them. A resident has to reproduce these strings exactly, so the mono is
+         * semantic. Never for timestamps, labels or small print.
+         */
+        command: ['IBM Plex Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
 
       /**

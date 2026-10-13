@@ -25,21 +25,27 @@
     <meta name="twitter:card" content="summary_large_image" />
 
     <!--
-      Fonts: preconnect + async load. Previously imported inside index.css,
-      which blocked first paint. Only the weights actually used are requested.
+      Fonts: preconnect + async load (not @import in CSS, which blocked first
+      paint). Only the weights actually used are requested.
+
+      Archivo carries the display sizes and the body copy: a tall x-height that
+      survives a mid-range screen in daylight, which is the real reading
+      condition for this product. IBM Plex Mono appears only on literal
+      WhatsApp commands (WATCH, STOP) — strings a resident must type exactly,
+      so the mono is carrying information, not decoration.
     -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap"
       media="print"
       onload="this.media='all'"
     />
     <noscript>
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap"
       />
     </noscript>
   </head>

@@ -95,6 +95,49 @@
     @apply not-sr-only fixed left-4 top-4 z-50 rounded-md bg-primary px-4 py-2 text-ink-invert shadow-md;
   }
 
+  /**
+   * Hero thread reveal — the only non-user-triggered motion in the product.
+   * Five moments land in order so the gap between the report and the
+   * coordinator's confirmation is felt rather than described. `--step` carries
+   * the position; the third step (the pause) gets the long beat before it.
+   */
+  .thread-step {
+    opacity: 0;
+    animation: thread-in 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+    animation-delay: calc(var(--step, 0) * 260ms + 120ms);
+  }
+  .thread-step[style*='--step: 3'],
+  .thread-step[style*='--step:3'] {
+    /* The confirmation waits — the pause above it is the point. */
+    animation-delay: 1180ms;
+  }
+  .thread-step[style*='--step: 4'],
+  .thread-step[style*='--step:4'] {
+    animation-delay: 1480ms;
+  }
+
+  @keyframes thread-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /**
+   * The global reduced-motion rule collapses durations but not delays, which
+   * would leave the thread invisible and then popping. Zero the delays too and
+   * the thread simply renders.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    .thread-step,
+    .thread-step[style*='--step: 3'],
+    .thread-step[style*='--step:3'],
+    .thread-step[style*='--step: 4'],
+    .thread-step[style*='--step:4'] {
+      opacity: 1;
+      animation: none !important;
+      animation-delay: 0ms !important;
+    }
+  }
+
   /* Loading skeleton shimmer. */
   .skeleton {
     @apply relative overflow-hidden bg-sunken rounded;

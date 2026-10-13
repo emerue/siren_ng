@@ -1,22 +1,13 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import {
-  MessageSquare,
-  ShieldCheck,
-  Users,
-  Landmark,
-  CheckCircle2,
-  ArrowRight,
-  MapPin,
-  Activity,
-} from 'lucide-react'
+import { ShieldCheck, CheckCircle2, Activity } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { getActiveIncidents } from '../api'
 import type { Incident } from '../types'
 import Nav from '../components/Nav'
 import Footer from '../components/Footer'
 import { ButtonLink } from '../components/ui/Button'
-import { Container, Section, SectionHeading, Card, Skeleton, EmptyState } from '../components/ui/Primitives'
+import { Container, Skeleton, EmptyState } from '../components/ui/Primitives'
 import { StatusPill, SeverityTag } from '../components/ui/StatusPill'
 import { useWhatsApp } from '../hooks/useWhatsApp'
 import { incidentTypeLabel } from '../lib/incident'
@@ -25,9 +16,18 @@ import { incidentTypeLabel } from '../lib/incident'
  * Landing page.
  *
  * The web layer is an explanation and trust surface, not the emergency
- * reporting app — reporting happens on WhatsApp (BRD §45). The page therefore
- * answers, in order: what is this → why care → how it works → why trust it →
- * what Siren actually promises → what to do next.
+ * reporting app — reporting happens on WhatsApp (BRD §45).
+ *
+ * Design: the product lives inside a chat thread, and what separates it from
+ * every other alert service is a human pause between a report arriving and
+ * anything being broadcast. So the thread is the hero at real scale, and the
+ * coordinator's confirmation is the one emphatic moment on the page. One
+ * incident runs through the whole page — the hero opens it at 11:04, the
+ * sequence section follows the same report to 13:22.
+ *
+ * The hero and footer sit on night (Siren speaking); everything between them
+ * is black on white (the public record). Teal marks human confirmation and
+ * nothing else. Red stays reserved for genuine criticality.
  *
  * Deliberately absent (BRD §5.2/§5.3): donations, resource boards, historical
  * data, zone safety scores, Guardian/Commute surfaces.
@@ -35,48 +35,66 @@ import { incidentTypeLabel } from '../lib/incident'
 
 /* ── Hero ──────────────────────────────────────────────────────────────── */
 
-function HeroVisual() {
+/**
+ * The reveal. Five moments land in sequence on load so the pause between the
+ * report and the confirmation is felt rather than described. This is the only
+ * non-user-triggered motion on the page; `prefers-reduced-motion` drops it to
+ * a static thread (see index.css).
+ */
+function Thread() {
   return (
-    <div className="relative" aria-hidden="true">
-      <Card className="overflow-hidden shadow-md">
-        {/* Inbound report */}
-        <div className="border-b border-line bg-sunken/60 px-4 py-3">
-          <p className="text-overline uppercase text-ink-faint">Resident → Siren</p>
+    <div className="space-y-2.5" aria-hidden="true">
+      <div className="thread-step" style={{ '--step': 0 } as React.CSSProperties}>
+        <p className="mb-1.5 text-caption text-primary-200">A resident, 11:04</p>
+        <div className="max-w-[90%] rounded-xl rounded-tl-sm bg-wash px-4 py-3">
+          <p className="text-body text-ink">Fire for Isolo market, near the bus stop</p>
         </div>
-        <div className="space-y-3 px-4 py-4">
-          <div className="max-w-[85%] rounded-lg rounded-tl-sm bg-sunken px-3.5 py-2.5">
-            <p className="text-sm text-ink-body">Fire for Isolo market, near the bus stop</p>
-            <p className="mt-1 text-overline text-ink-faint">11:04</p>
-          </div>
-          <div className="max-w-[85%] rounded-lg rounded-tl-sm bg-sunken px-3.5 py-2.5">
-            <p className="text-sm text-ink-body">Received — a coordinator is confirming it now.</p>
-            <p className="mt-1 text-overline text-ink-faint">11:04</p>
-          </div>
-        </div>
+      </div>
 
-        {/* Human verification — the pivot of the whole product */}
-        <div className="flex items-center gap-2.5 border-y border-line bg-primary-50 px-4 py-3">
-          <ShieldCheck className="h-4 w-4 shrink-0 text-primary-700" />
-          <p className="text-caption font-semibold text-primary-700">
-            Confirmed by a Siren coordinator · 6 min
+      <div className="thread-step" style={{ '--step': 1 } as React.CSSProperties}>
+        <div className="ml-auto max-w-[90%] rounded-xl rounded-tr-sm bg-primary-600 px-4 py-3">
+          <p className="text-body text-ink-invert">Received. A coordinator is checking it now.</p>
+          <p className="mt-1 text-caption text-primary-200">11:04</p>
+        </div>
+      </div>
+
+      {/* The pause. The product's whole claim, given its own space. */}
+      <div
+        className="thread-step flex items-center gap-3 py-3"
+        style={{ '--step': 2 } as React.CSSProperties}
+      >
+        <span className="h-px flex-1 bg-primary-600" />
+        <p className="text-caption text-primary-200">six minutes while a person reads it</p>
+        <span className="h-px flex-1 bg-primary-600" />
+      </div>
+
+      <div className="thread-step" style={{ '--step': 3 } as React.CSSProperties}>
+        <div className="flex items-start gap-3 rounded-xl border border-confirm/60 bg-confirm/10 px-4 py-3.5">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-confirm" aria-hidden="true" />
+          <div>
+            <p className="text-body font-semibold text-ink-invert">
+              Confirmed by a Siren coordinator
+            </p>
+            <p className="mt-0.5 text-caption text-primary-200">11:10</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="thread-step" style={{ '--step': 4 } as React.CSSProperties}>
+        <p className="mb-1.5 text-caption text-primary-200">
+          Sent to everyone watching Oshodi-Isolo, 11:10
+        </p>
+        <div className="rounded-xl rounded-tl-sm bg-surface px-4 py-3.5">
+          <div className="flex items-center gap-2">
+            <SeverityTag severity="HIGH" />
+            <span className="text-caption font-semibold text-ink">Fire in Oshodi-Isolo</span>
+          </div>
+          <p className="mt-2 text-caption text-ink-body">
+            Confirmed by a Siren coordinator. Your neighbours here have been alerted and
+            emergency services notified.
           </p>
         </div>
-
-        {/* Outbound alert */}
-        <div className="px-4 py-4">
-          <p className="mb-2.5 text-overline uppercase text-ink-faint">Siren → Neighbours in Oshodi-Isolo</p>
-          <div className="rounded-lg border border-line bg-surface px-3.5 py-3">
-            <div className="flex items-center gap-2">
-              <SeverityTag severity="HIGH" />
-              <span className="text-caption font-semibold text-ink">Fire · Oshodi-Isolo</span>
-            </div>
-            <p className="mt-2 text-caption text-ink-body">
-              Confirmed by a Siren coordinator. Your neighbours here have been alerted and
-              emergency services notified.
-            </p>
-          </div>
-        </div>
-      </Card>
+      </div>
     </div>
   )
 }
@@ -85,226 +103,276 @@ function Hero() {
   const { waLink } = useWhatsApp()
 
   return (
-    <section className="border-b border-line bg-surface">
+    <section className="bg-night">
       <Container className="py-14 sm:py-20">
-        <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_1fr] lg:gap-16">
+        <div className="grid gap-12 lg:grid-cols-[1fr_27rem] lg:items-center lg:gap-20">
           <div>
-            <p className="mb-4 inline-flex items-center gap-2 rounded-md bg-sunken px-2.5 py-1 text-overline uppercase text-ink-muted">
-              <MapPin className="h-3 w-3" aria-hidden="true" />
-              Piloting in Oshodi-Isolo, Lagos
-            </p>
-
-            {/*
-              Headline stays at display-lg rather than display-xl: in the hero's
-              ~560px column, 3.5rem broke to five ragged lines and read as shouting.
-            */}
-            <h1 className="text-display sm:text-display-lg text-ink">
-              When something happens on your street, your neighbours should know.
+            <h1 className="text-display font-extrabold text-ink-invert sm:text-display-lg">
+              Someone reads your report before your street hears about it.
             </h1>
 
-            <p className="mt-5 max-w-xl text-body-lg text-ink-body">
-              Report an emergency on WhatsApp. A Siren coordinator confirms it is real,
-              then everyone subscribed in your LGA is alerted — and emergency services
-              are notified.
+            <p className="mt-6 max-w-[54ch] text-body-lg text-primary-100">
+              Send what you saw to Siren on WhatsApp. A coordinator confirms it is real,
+              then everyone subscribed in your LGA is alerted and emergency services are
+              notified. Nothing goes out until a person says so.
             </p>
 
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <ButtonLink
                 href={waLink('I want to report an emergency')}
                 target="_blank"
                 rel="noopener noreferrer"
+                variant="inverse"
                 size="lg"
               >
-                Report on WhatsApp
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                Report an emergency
               </ButtonLink>
-              <ButtonLink to="/connect" variant="secondary" size="lg">
+              <ButtonLink
+                to="/connect"
+                size="lg"
+                className="border border-primary-400 bg-transparent text-ink-invert hover:bg-primary-600"
+              >
                 Get alerts for your area
               </ButtonLink>
             </div>
 
-            <p className="mt-5 text-caption text-ink-muted">
-              No app to install. No account. Works on WhatsApp.
+            <p className="mt-6 text-sm text-primary-200">
+              Nothing to install, no account. Piloting in Oshodi-Isolo, Lagos.
             </p>
           </div>
 
-          <HeroVisual />
+          <Thread />
         </div>
       </Container>
     </section>
   )
 }
 
-/* ── Problem ───────────────────────────────────────────────────────────── */
+/* ── Why it exists ─────────────────────────────────────────────────────── */
 
-function Problem() {
+/**
+ * The 78% figure as the subject of a sentence rather than a stat tile. The two
+ * supporting figures sit in the source line, where they belong — they qualify
+ * the first one instead of competing with it.
+ */
+function Why() {
   return (
-    <Section labelledBy="problem-heading">
+    <section className="border-b border-line bg-surface py-14 sm:py-section">
       <Container>
-        <SectionHeading
-          id="problem-heading"
-          eyebrow="Why this exists"
-          title="In an emergency, most people call someone they know — not a hotline."
-          lede="Word of mouth is fast but unverified. Official lines are overwhelmed. Siren adds verification and structure to the response that already happens on your street."
-        />
-
-        <dl className="mt-10 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-3">
-          {[
-            {
-              stat: '78%',
-              label: 'call family, friends or neighbours first in a medical emergency',
-              source: 'Emergency Response Africa survey',
-            },
-            {
-              stat: '~3%',
-              label: 'call an ambulance as their first action',
-              source: 'Emergency Response Africa survey',
-            },
-            {
-              stat: '~95%',
-              label: 'of Nigerian internet users are reachable on WhatsApp',
-              source: 'Nigerian internet usage data',
-            },
-          ].map((s) => (
-            <div key={s.stat} className="bg-surface p-6">
-              <dt className="text-display text-ink">{s.stat}</dt>
-              <dd className="mt-1.5 text-sm text-ink-body">
-                {s.label}
-                <span className="mt-2 block text-overline uppercase text-ink-faint">{s.source}</span>
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <div className="max-w-[62ch]">
+          <p className="text-h2 font-normal text-ink-body">
+            In a medical emergency,{' '}
+            <strong className="text-display font-extrabold leading-none text-ink">
+              78 in 100
+            </strong>{' '}
+            Lagosians call family, friends or a neighbour first. About three call an
+            ambulance.
+          </p>
+          <p className="mt-6 max-w-[58ch] text-body-lg text-ink-body">
+            That response is already happening on your street, and it is fast. What it
+            lacks is any way to tell a real emergency from a rumour. Siren adds the
+            missing step — a person who checks — and then carries the confirmed report
+            to the neighbours who can act on it.
+          </p>
+          <p className="mt-6 text-caption text-ink-faint">
+            Figures from an Emergency Response Africa survey. Roughly 95% of Nigerian
+            internet users are reachable on WhatsApp, which is why Siren lives there and
+            not in an app.
+          </p>
+        </div>
       </Container>
-    </Section>
+    </section>
   )
 }
 
-/* ── How it works ──────────────────────────────────────────────────────── */
+/* ── The sequence ──────────────────────────────────────────────────────── */
 
-const STEPS = [
+/**
+ * The same incident the hero opened, followed to the end. A transcript down a
+ * single rule rather than a rail of five cards: this is a sequence in time, and
+ * the timeline is a real product surface (the public incident page), so the form
+ * matches something the reader will actually meet later.
+ */
+const MOMENTS = [
   {
-    icon: MessageSquare,
-    title: 'Report',
-    body: 'Send what you saw to the Siren number on WhatsApp — English or Pidgin, however short. A photo helps but is not required.',
+    time: '11:04',
+    title: 'The report arrives',
+    body: 'A resident sends what they saw, in English or Pidgin, however short. A photo helps but is not required. Siren replies straight away so they know it landed.',
   },
   {
-    icon: ShieldCheck,
-    title: 'A coordinator confirms',
-    body: 'Reports are sorted automatically to speed up review, but a named Siren coordinator decides what is real. Nothing is broadcast without them.',
+    time: '11:04',
+    title: 'Software sorts it, and stops',
+    body: 'The report is classified automatically to put it in front of a coordinator faster. That is the limit of what software decides. It cannot alert anyone.',
   },
   {
-    icon: Users,
+    time: '11:10',
+    title: 'A named coordinator confirms it',
+    body: 'A person reads the report and decides whether it is real. This is the only action in the entire system that can send an alert to a neighbourhood.',
+    pivot: true,
+  },
+  {
+    time: '11:10',
     title: 'Neighbours are alerted',
-    body: 'Everyone subscribed to that LGA gets a WhatsApp alert saying what happened and where.',
+    body: 'Everyone subscribed to that LGA gets a WhatsApp message saying what happened, where, and that a coordinator confirmed it.',
   },
   {
-    icon: Landmark,
-    title: 'Emergency services notified',
-    body: 'Siren forwards every confirmed incident to official channels. We tell you we sent it — we never promise what they will do.',
+    time: '11:10',
+    title: 'Emergency services are notified',
+    body: 'Siren forwards every confirmed report to official channels and records that it was sent. We never tell you what they will do about it.',
   },
   {
-    icon: CheckCircle2,
-    title: 'The loop closes',
-    body: 'When the incident is over, the person who reported it is told, and the record stays open to view.',
+    time: '13:22',
+    title: 'The reporter is told it is over',
+    body: 'When the incident closes, the person who reported it hears back. The record stays public at its own page, with a timestamp against every step.',
   },
 ]
 
-function HowItWorks() {
+function Sequence() {
   return (
-    <Section tone="surface" id="how-it-works" labelledBy="how-heading">
+    <section
+      id="how-it-works"
+      aria-labelledby="sequence-heading"
+      className="border-b border-line bg-canvas py-14 sm:py-section"
+    >
       <Container>
-        <SectionHeading
-          id="how-heading"
-          eyebrow="How it works"
-          title="One report, five steps, no guesswork."
-          lede="Every step is something Siren actually does — you can watch it happen on the incident page."
-        />
+        <h2 id="sequence-heading" className="max-w-[48ch] text-h1 text-ink sm:text-display">
+          One report, followed all the way through.
+        </h2>
+        <p className="mt-4 max-w-[58ch] text-body-lg text-ink-body">
+          This is the incident from above, from the message arriving to the reporter
+          hearing it is over. Every step is something Siren did, and every one of them
+          is visible on the public page afterwards.
+        </p>
 
-        <ol className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {STEPS.map((step, i) => {
-            const Icon = step.icon
-            return (
-              <li key={step.title} className="relative rounded-lg bg-sunken/70 p-5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-md bg-surface text-primary-700 shadow-xs">
-                  <Icon className="h-4.5 w-4.5" aria-hidden="true" />
-                </span>
-                <p className="mt-4 text-overline uppercase text-ink-faint">Step {i + 1}</p>
-                {/* text-sm, not h3: in a 5-up rail the larger size wrapped every
-                    title onto two ragged lines and broke the horizontal rhythm. */}
-                <h3 className="mt-1 text-sm font-semibold text-ink">{step.title}</h3>
-                <p className="mt-1.5 text-caption text-ink-body">{step.body}</p>
-              </li>
-            )
-          })}
+        <ol className="mt-12 max-w-[64ch]">
+          {MOMENTS.map((m) => (
+            <li key={m.title + m.time} className="relative flex gap-5 pb-9 last:pb-0 sm:gap-7">
+              {/* Rule and node. Last item stops the rule rather than trailing off. */}
+              <div className="relative flex w-14 shrink-0 justify-end sm:w-16">
+                <span
+                  aria-hidden="true"
+                  className="absolute right-[-1.375rem] top-2 h-full w-px bg-line-strong sm:right-[-1.875rem]"
+                />
+                <p
+                  className={
+                    m.pivot
+                      ? 'relative z-10 font-command text-caption text-confirm'
+                      : 'relative z-10 font-command text-caption text-ink-faint'
+                  }
+                >
+                  {m.time}
+                </p>
+                <span
+                  aria-hidden="true"
+                  className={
+                    m.pivot
+                      ? 'absolute right-[-1.625rem] top-[0.3125rem] z-10 h-2.5 w-2.5 rounded-full bg-confirm ring-4 ring-canvas sm:right-[-2.125rem]'
+                      : 'absolute right-[-1.5rem] top-[0.4375rem] z-10 h-1.5 w-1.5 rounded-full bg-line-strong ring-4 ring-canvas sm:right-[-2rem]'
+                  }
+                />
+              </div>
+
+              <div className="pt-px">
+                <h3
+                  className={
+                    m.pivot
+                      ? 'text-h3 font-bold text-confirm'
+                      : 'text-h3 text-ink'
+                  }
+                >
+                  {m.title}
+                </h3>
+                <p className="mt-1.5 max-w-[52ch] text-sm text-ink-body">{m.body}</p>
+              </div>
+            </li>
+          ))}
         </ol>
       </Container>
-    </Section>
+    </section>
   )
 }
 
-/* ── Trust ─────────────────────────────────────────────────────────────── */
+/* ── What Siren promises ───────────────────────────────────────────────── */
 
-function Trust() {
+/**
+ * The promise boundary (BRD §8). Stated as two plain columns, because the thing
+ * that earns trust here is being specific about the limit, not decorating it.
+ */
+function PromiseBoundary() {
   return (
-    <Section labelledBy="trust-heading">
+    <section
+      aria-labelledby="promise-heading"
+      className="border-b border-line bg-surface py-14 sm:py-section"
+    >
       <Container>
-        <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
+        <h2 id="promise-heading" className="max-w-[46ch] text-h1 text-ink sm:text-display">
+          What Siren promises, and what it cannot.
+        </h2>
+        <p className="mt-4 max-w-[58ch] text-body-lg text-ink-body">
+          A false alarm spreads panic and costs us the only thing that makes this work.
+          So speed never overrides the person checking, and we do not claim credit for
+          anything we did not do.
+        </p>
+
+        <div className="mt-11 grid gap-x-12 gap-y-9 sm:grid-cols-2">
           <div>
-            <SectionHeading
-              id="trust-heading"
-              eyebrow="Why you can trust it"
-              title="A person decides what gets sent to your neighbours."
-              lede="False alarms spread panic and destroy trust — so speed never overrides verification. Software sorts reports to make review fast; a human confirms every single one before anyone is alerted."
-            />
-            <div className="mt-7 space-y-3">
+            <h3 className="border-t-2 border-confirm pt-4 text-h3 text-ink">
+              What we do
+            </h3>
+            <ul className="mt-4 space-y-3">
               {[
-                'An unverified report reaches no one but the coordinator.',
-                'Every alert says who confirmed it and when.',
-                'Your phone number is never shown in an alert or on the site.',
+                'Confirm the report with a named coordinator before anyone is alerted.',
+                'Alert everyone subscribed in that LGA, saying who confirmed it and when.',
+                'Forward the confirmed report to emergency services, and record that we sent it.',
+                'Tell the person who reported it when the incident closes.',
+                'Keep your phone number out of every alert and off the site.',
               ].map((line) => (
-                <div key={line} className="flex gap-2.5">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-status-resolved" aria-hidden="true" />
+                <li key={line} className="flex gap-2.5">
+                  <CheckCircle2
+                    className="mt-0.5 h-4 w-4 shrink-0 text-confirm"
+                    aria-hidden="true"
+                  />
                   <p className="text-sm text-ink-body">{line}</p>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           </div>
 
-          {/* The promise boundary, stated as plainly as we can put it. */}
-          <Card className="self-start p-6 sm:p-7">
-            <h3 className="text-h3 text-ink">What Siren promises — and what it does not</h3>
-            <dl className="mt-5 space-y-4">
-              <div>
-                <dt className="text-overline uppercase text-status-resolved">What we do</dt>
-                <dd className="mt-1.5 text-sm text-ink-body">
-                  We confirm the report, alert subscribed neighbours in that LGA, notify
-                  emergency services, and tell you when it is resolved.
-                </dd>
-              </div>
-              <div className="border-t border-line pt-4">
-                <dt className="text-overline uppercase text-ink-muted">What we cannot promise</dt>
-                <dd className="mt-1.5 text-sm text-ink-body">
-                  We cannot promise that an ambulance, the fire service or the police will
-                  arrive. Siren is not an emergency service, and we will never suggest
-                  otherwise.
-                </dd>
-              </div>
-            </dl>
-            <p className="mt-5 rounded-md bg-sunken px-3.5 py-3 text-caption text-ink-body">
-              In a life-threatening emergency, call <strong className="font-semibold text-ink">767</strong> or{' '}
+          <div>
+            <h3 className="border-t-2 border-line-strong pt-4 text-h3 text-ink">
+              What we cannot
+            </h3>
+            <div className="mt-4 space-y-3 text-sm text-ink-body">
+              <p>
+                We cannot promise that an ambulance, the fire service or the police will
+                arrive, or how quickly. Siren notifies them; what happens next is not
+                ours to commit to.
+              </p>
+              <p>
+                We cannot watch an area no coordinator is covering. Confirmation runs
+                during published hours, and outside them Siren says so plainly instead of
+                implying someone is reading.
+              </p>
+              <p>
+                We do not dispatch responders, and we do not tell you help is on the way.
+                Any alert you get from us describes only what Siren itself did.
+              </p>
+            </div>
+            <p className="mt-5 border-t border-line pt-4 text-sm text-ink-body">
+              In a life-threatening emergency, call{' '}
+              <strong className="font-semibold text-ink">767</strong> or{' '}
               <strong className="font-semibold text-ink">112</strong> as well.
             </p>
-          </Card>
+          </div>
         </div>
       </Container>
-    </Section>
+    </section>
   )
 }
 
-/* ── Live incidents ────────────────────────────────────────────────────── */
+/* ── The public record ─────────────────────────────────────────────────── */
 
-function LiveIncidents() {
+function Record() {
   const { data: incidents = [], isLoading, isError } = useQuery<Incident[]>({
     queryKey: ['active-incidents'],
     queryFn: getActiveIncidents,
@@ -312,35 +380,36 @@ function LiveIncidents() {
   })
 
   return (
-    <Section tone="surface" labelledBy="live-heading">
+    <section
+      aria-labelledby="record-heading"
+      className="border-b border-line bg-canvas py-14 sm:py-section"
+    >
       <Container>
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <SectionHeading
-            id="live-heading"
-            eyebrow="Transparency"
-            title="See what Siren has actually done."
-            lede="Every confirmed incident has a public page showing each step we took, and when."
-            className="mb-0"
-          />
+        <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+          <div className="max-w-[48ch]">
+            <h2 id="record-heading" className="text-h1 text-ink sm:text-display">
+              Everything Siren has confirmed is public.
+            </h2>
+            <p className="mt-4 max-w-[54ch] text-body-lg text-ink-body">
+              Each confirmed incident keeps its own page, showing the steps above with the
+              time each one actually happened.
+            </p>
+          </div>
           <Link
             to="/feed"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary-700 hover:underline"
+            className="text-sm font-semibold text-primary-700 underline decoration-primary-200 decoration-2 underline-offset-4 hover:decoration-primary-700"
           >
-            All incidents
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            See every incident
           </Link>
         </div>
 
-        <div className="mt-8">
+        <div className="mt-9">
           {isLoading && (
-            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="divide-y divide-line border-y border-line">
               {[0, 1, 2].map((i) => (
-                <li key={i}>
-                  <Card className="p-5">
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="mt-3 h-5 w-40" />
-                    <Skeleton className="mt-2 h-4 w-full" />
-                  </Card>
+                <li key={i} className="py-4">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="mt-2.5 h-5 w-56" />
                 </li>
               ))}
             </ul>
@@ -349,76 +418,88 @@ function LiveIncidents() {
           {isError && (
             <EmptyState
               icon={Activity}
-              title="Live incidents are unavailable right now"
-              description="We could not reach the incident feed. It should return shortly."
+              title="The incident feed is unavailable right now"
+              description="We could not reach it. This page will pick the feed back up on its own shortly."
             />
           )}
 
           {!isLoading && !isError && incidents.length === 0 && (
             <EmptyState
               icon={CheckCircle2}
-              title="No active incidents"
-              description="Nothing is currently open in the areas Siren covers. Confirmed incidents appear here as they happen."
+              title="Nothing is open right now"
+              description="No confirmed incident is currently active in the areas Siren covers. New ones appear here as coordinators confirm them."
               action={
                 <ButtonLink to="/feed" variant="secondary" size="sm">
-                  View past incidents
+                  Read past incidents
                 </ButtonLink>
               }
             />
           )}
 
+          {/*
+            A record reads as a list, not as a grid of cards: the rows share a
+            scale so two incidents can be compared down the column.
+          */}
           {!isLoading && !isError && incidents.length > 0 && (
-            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="divide-y divide-line border-y border-line">
               {incidents.slice(0, 6).map((incident) => (
                 <li key={incident.id}>
-                  <Card interactive as="article" className="h-full">
-                    <Link to={`/track/${incident.id}`} className="block h-full p-5">
-                      <div className="flex items-center gap-2">
-                        <StatusPill status={incident.status} size="sm" />
-                        <SeverityTag severity={incident.severity} />
-                      </div>
-                      <h3 className="mt-3 text-h3 text-ink">
+                  <Link
+                    to={`/track/${incident.id}`}
+                    className="group flex flex-col gap-2 py-4 transition-colors duration-fast hover:bg-surface sm:flex-row sm:items-baseline sm:gap-6"
+                  >
+                    <p className="order-2 shrink-0 font-command text-caption text-ink-faint sm:order-1 sm:w-28">
+                      {formatDistanceToNow(new Date(incident.created_at), { addSuffix: true })}
+                    </p>
+                    <div className="order-1 min-w-0 flex-1 sm:order-2">
+                      <h3 className="text-h3 text-ink group-hover:underline">
                         {incidentTypeLabel(incident.incident_type)}
                         {incident.zone_name && (
-                          <span className="font-normal text-ink-muted"> · {incident.zone_name}</span>
+                          <span className="font-normal text-ink-muted"> in {incident.zone_name}</span>
                         )}
                       </h3>
-                      <p className="mt-1.5 line-clamp-2 text-caption text-ink-body">
+                      <p className="mt-1 line-clamp-2 max-w-[62ch] text-sm text-ink-body">
                         {incident.description}
                       </p>
-                      <p className="mt-3 text-overline uppercase text-ink-faint">
-                        {formatDistanceToNow(new Date(incident.created_at), { addSuffix: true })}
-                      </p>
-                    </Link>
-                  </Card>
+                    </div>
+                    <div className="order-3 flex shrink-0 items-center gap-2">
+                      <StatusPill status={incident.status} size="sm" />
+                      <SeverityTag severity={incident.severity} />
+                    </div>
+                  </Link>
                 </li>
               ))}
             </ul>
           )}
         </div>
       </Container>
-    </Section>
+    </section>
   )
 }
 
-/* ── Closing CTA ───────────────────────────────────────────────────────── */
+/* ── Join ──────────────────────────────────────────────────────────────── */
 
-function ClosingCTA() {
+/**
+ * The commands are set in mono because a resident has to type them exactly.
+ * That is the only place mono appears in the product.
+ */
+function Join() {
   const { waLink } = useWhatsApp()
 
   return (
-    <Section labelledBy="cta-heading">
+    <section aria-labelledby="join-heading" className="bg-night py-14 sm:py-section">
       <Container>
-        <div className="rounded-xl bg-primary-700 px-6 py-12 sm:px-12 sm:py-14">
-          <div className="max-w-prose">
-            <h2 id="cta-heading" className="text-h1 sm:text-display text-ink-invert">
-              Get alerts for the area you live in.
+        <div className="grid gap-10 lg:grid-cols-[1fr_24rem] lg:gap-20">
+          <div>
+            <h2
+              id="join-heading"
+              className="max-w-[40ch] text-h1 font-extrabold text-ink-invert sm:text-display"
+            >
+              Hear about it from a person who checked.
             </h2>
-            <p className="mt-4 text-body-lg text-primary-100">
-              Send <strong className="font-semibold text-ink-invert">WATCH</strong> and your LGA — for
-              example <strong className="font-semibold text-ink-invert">WATCH Oshodi-Isolo</strong> — to the
-              Siren number on WhatsApp. Send <strong className="font-semibold text-ink-invert">STOP</strong> any
-              time to leave.
+            <p className="mt-4 max-w-[52ch] text-body-lg text-primary-100">
+              Subscribe to the LGA you live in. You will only ever get a message a
+              coordinator has confirmed, and you can leave at any time.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <ButtonLink
@@ -429,21 +510,33 @@ function ClosingCTA() {
                 size="lg"
               >
                 Subscribe on WhatsApp
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </ButtonLink>
               <ButtonLink
                 to="/#how-it-works"
-                variant="ghost"
                 size="lg"
-                className="text-primary-100 hover:bg-primary-600 hover:text-ink-invert"
+                className="border border-primary-400 bg-transparent text-ink-invert hover:bg-primary-600"
               >
-                Read how it works
+                Read it again
               </ButtonLink>
             </div>
           </div>
+
+          <dl className="space-y-4 self-end border-t border-primary-600 pt-6">
+            {[
+              { cmd: 'WATCH Oshodi-Isolo', desc: 'Start getting alerts for that LGA' },
+              { cmd: 'LIST', desc: 'See which areas you are subscribed to' },
+              { cmd: 'STOP Oshodi-Isolo', desc: 'Leave that one area' },
+              { cmd: 'PIDGIN', desc: 'Switch the messages to Pidgin' },
+            ].map((c) => (
+              <div key={c.cmd}>
+                <dt className="font-command text-sm text-ink-invert">{c.cmd}</dt>
+                <dd className="mt-0.5 text-caption text-primary-200">{c.desc}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
       </Container>
-    </Section>
+    </section>
   )
 }
 
@@ -455,11 +548,11 @@ export default function HomePage() {
       <Nav />
       <main id="main">
         <Hero />
-        <Problem />
-        <HowItWorks />
-        <Trust />
-        <LiveIncidents />
-        <ClosingCTA />
+        <Why />
+        <Sequence />
+        <PromiseBoundary />
+        <Record />
+        <Join />
       </main>
       <Footer />
     </div>
